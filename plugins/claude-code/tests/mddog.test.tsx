@@ -62,8 +62,9 @@ test('the model opens a file in the pane with the open tool', async ($, on) => {
 
   await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
   const missing = await $.tool.call({ tool: 'mcp__mddog__open', path: ' ' })
-  expect(missing.deny).toContain('path')
-  expect((await $.tool.call({ tool: 'mcp__mddog__open', path: 'nope.md' })).deny).toContain('does not exist')
+  expect(missing.isError).toBe(true)
+  expect(missing.text).toContain('path')
+  expect((await $.tool.call({ tool: 'mcp__mddog__open', path: 'nope.md' })).text).toContain('does not exist')
 
   const ran = await $.tool.call({ tool: 'mcp__mddog__open', path: 'notes/plan.md' })
   expect(String(ran.result)).toContain('notes/plan.md')

@@ -244,7 +244,9 @@ export const register: Register = on => {
     }
   })
 
-  on('tool.call', { tool: TOOL }, async ($, e) => {
+  // Served at tool.run, after the permission check: where sec-default is seated, a call served at
+  // tool.call was never allowed, so the mdd child it starts is refused as a repeat of a Bash call.
+  on('tool.run', { tool: TOOL }, async ($, e) => {
     const path = typeof e.path === 'string' ? e.path.trim() : ''
     if (!path) return { deny: 'path is required: the Markdown file to show' }
     if (!(await $.fs.exists(path))) return { deny: `${path} does not exist` }
