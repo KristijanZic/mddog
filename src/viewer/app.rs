@@ -137,6 +137,9 @@ pub struct Heading {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
+    /// How many headings above it, still open, have a smaller level.
+    pub depth: u8,
+    /// Whether digits, `J`, and `K` jump to it.
     pub root: bool,
     pub title: String,
     pub row: u32,
@@ -818,19 +821,24 @@ fn scroll_step(key: Key) -> Option<(Step, bool)> {
     })
 }
 
+/// Every heading in document order. A heading nests under the open headings above it with a smaller
+/// level, whatever the jump between levels. Roots sit at depth 0, or at depth 1 when one heading
+/// alone sits at depth 0 and others nest under it, as a title does.
 pub fn toc_entries(headings: &[Heading]) -> Vec<Entry> {
-    let mut levels: Vec<u8> = headings.iter().map(|h| h.level).collect();
-    levels.sort_unstable();
-    levels.dedup();
-    let Some(&cap) = levels.get(2).or(levels.last()) else { return vec![] };
-    let kept: Vec<&Heading> = headings.iter().filter(|h| h.level <= cap).collect();
-    let mut present: Vec<u8> = kept.iter().map(|h| h.level).collect();
-    present.sort_unstable();
-    present.dedup();
-    let smallest = present[0];
-    let root = if present.len() >= 2 && kept.iter().filter(|h| h.level == smallest).count() == 1 { present[1] } else { smallest };
-    let sub = present.iter().copied().find(|&l| l > root);
-    kept.iter().filter(|h| h.level == root || Some(h.level) == sub).map(|h| Entry { root: h.level == root, title: h.title.clone(), row: h.row }).collect()
+    let mut open: Vec<u8> = Vec::new();
+    let depths: Vec<u8> = headings
+        .iter()
+        .map(|h| {
+            while open.last().is_some_and(|&l| l >= h.level) {
+                open.pop();
+            }
+            open.push(h.level);
+            u8::try_from(open.len() - 1).unwrap_or(u8::MAX)
+        })
+        .collect();
+    let titled = depths.len() > 1 && depths.iter().filter(|&&d| d == 0).count() == 1;
+    let root = u8::from(titled);
+    headings.iter().zip(depths).map(|(h, depth)| Entry { depth, root: depth == root, title: h.title.clone(), row: h.row }).collect()
 }
 
 pub fn toc_width(cols: u16) -> u16 {
@@ -1210,12 +1218,51 @@ mod tests {
         assert_eq!(toc_width(30), 0);
     }
 
+    /// Each entry as its depth, whether it is a root, and its title, from headings given as (level, title).
+    fn outline(heads: &[(u8, &str)]) -> Vec<(u8, bool, String)> {
+        let heads: Vec<Heading> = heads.iter().zip(0..).map(|(&(l, t), row)| h(l, t, row)).collect();
+        toc_entries(&heads).into_iter().map(|e| (e.depth, e.root, e.title)).collect()
+    }
+
+    fn ents(want: &[(u8, bool, &str)]) -> Vec<(u8, bool, String)> {
+        want.iter().map(|&(d, r, t)| (d, r, t.to_string())).collect()
+    }
+
     #[test]
     fn t03_levels() {
-        let e = toc_entries(&[h(1, "T", 0), h(2, "A", 5), h(3, "a", 9), h(4, "x", 12)]);
-        assert_eq!(e.iter().map(|e| (e.root, e.title.as_str())).collect::<Vec<_>>(), vec![(true, "A"), (false, "a")]);
-        let e = toc_entries(&[h(1, "A", 0), h(1, "B", 5), h(2, "b", 9), h(3, "c", 12)]);
-        assert_eq!(e.iter().map(|e| (e.root, e.title.as_str())).collect::<Vec<_>>(), vec![(true, "A"), (true, "B"), (false, "b")]);
+        // A lone first heading at the top level is the title: it shows, and the level under it gives the roots.
+        assert_eq!(outline(&[(1, "T"), (2, "A"), (3, "a"), (4, "x"), (2, "B")]), ents(&[(0, false, "T"), (1, true, "A"), (2, false, "a"), (3, false, "x"), (1, true, "B")]));
+        assert_eq!(outline(&[(1, "A"), (1, "B"), (2, "b"), (3, "c")]), ents(&[(0, true, "A"), (0, true, "B"), (1, false, "b"), (2, false, "c")]));
+        assert_eq!(outline(&[(2, "only")]), ents(&[(0, true, "only")]));
+        assert!(outline(&[]).is_empty());
+    }
+
+    #[test]
+    fn every_heading_shows_in_order_when_an_h1_comes_late() {
+        // The Markdown from issue #7.
+        let e = outline(&[(2, "Title 2"), (3, "subsection"), (3, "subsection"), (1, "Big Title"), (2, "section"), (3, "subsection")]);
+        assert_eq!(e, ents(&[(0, true, "Title 2"), (1, false, "subsection"), (1, false, "subsection"), (0, true, "Big Title"), (1, false, "section"), (2, false, "subsection")]));
+    }
+
+    #[test]
+    fn odd_level_orders_keep_every_heading() {
+        assert_eq!(outline(&[(3, "a"), (4, "b"), (3, "c")]), ents(&[(0, true, "a"), (1, false, "b"), (0, true, "c")]));
+        assert_eq!(outline(&[(1, "A"), (4, "deep"), (1, "B")]), ents(&[(0, true, "A"), (1, false, "deep"), (0, true, "B")]));
+        assert_eq!(outline(&[(2, "a"), (4, "b"), (1, "C"), (6, "d")]), ents(&[(0, true, "a"), (1, false, "b"), (0, true, "C"), (1, false, "d")]));
+        assert_eq!(outline(&[(1, "A"), (1, "B"), (1, "C")]), ents(&[(0, true, "A"), (0, true, "B"), (0, true, "C")]));
+        assert_eq!(outline(&[(2, "a"), (4, "b"), (3, "c")]), ents(&[(0, false, "a"), (1, true, "b"), (1, true, "c")]));
+    }
+
+    #[test]
+    fn a_digit_on_a_titled_file_jumps_past_the_title() {
+        let mut a = app(200, 20);
+        a.set_headings(&[h(1, "T", 0), h(2, "A", 10), h(3, "a1", 20), h(2, "B", 40)]);
+        a.handle(Key::Char('1'));
+        assert_eq!(a.scroll, 10);
+        a.handle(Key::Char('1'));
+        assert_eq!(a.scroll, 20);
+        a.handle(Key::Char('2'));
+        assert_eq!(a.scroll, 40);
     }
 
     #[test]

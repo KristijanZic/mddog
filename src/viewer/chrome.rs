@@ -86,7 +86,7 @@ impl Chrome<'_> {
         let mut lines: Vec<(String, bool)> = vec![(String::new(), false), (title.into(), false), ("─".repeat(content), false)];
         for (i, e) in self.app.entries.iter().enumerate().skip(self.app.toc_offset as usize) {
             let title = term::printable(&e.title);
-            let label = if e.root { format!(" {title}") } else { format!("   {title}") };
+            let label = format!("{}{title}", " ".repeat(1 + 2 * usize::from(e.depth)));
             let max = content.saturating_sub(1);
             let label = if term::width(&label) > max { term::fit(&label, max.saturating_sub(1)).0 + "…" } else { label };
             lines.push((label, current == Some(i)));
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn a_light_theme_draws_light_chrome() {
         let light = theme::builtin("github-light").unwrap().palette;
-        let entries: Vec<app::Entry> = (0..4).map(|i| app::Entry { root: true, title: format!("h{i}"), row: i }).collect();
+        let entries: Vec<app::Entry> = (0..4).map(|i| app::Entry { depth: 0, root: true, title: format!("h{i}"), row: i }).collect();
         let mut app = App::default();
         (app.entries, app.toc_visible, app.toc_list_height) = (entries, true, 4);
         let mut out = String::new();
@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn the_sidebar_has_a_gap_a_title_and_a_full_rule_then_plain_entries() {
-        let entries = vec![app::Entry { root: true, title: "Intro".into(), row: 0 }, app::Entry { root: false, title: "Setup".into(), row: 5 }];
+        let entries = vec![app::Entry { depth: 0, root: true, title: "Intro".into(), row: 0 }, app::Entry { depth: 1, root: false, title: "Setup".into(), row: 5 }];
         let mut app = App::default();
         (app.entries, app.toc_visible, app.toc_list_height) = (entries, true, 4);
         let mut out = String::new();
@@ -266,7 +266,7 @@ mod tests {
 
     /// The last three columns of screen lines 1 to 9, one line each.
     fn edges(entries: usize, offset: u32) -> Vec<String> {
-        let out = sidebar((0..entries).map(|i| app::Entry { root: true, title: format!("h{i}"), row: i as u32 }).collect(), offset);
+        let out = sidebar((0..entries).map(|i| app::Entry { depth: 0, root: true, title: format!("h{i}"), row: i as u32 }).collect(), offset);
         (1..=9)
             .map(|r| {
                 let line: Vec<char> = sidebar_line(&out, r).chars().collect();
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn a_fitting_list_gets_one_line_and_full_width_entries() {
         assert_eq!(edges(6, 0), ["  │", "  │", "──┤", "  │", "  │", "  │", "  │", "  │", "  │"]);
-        let out = sidebar((0..6).map(|i| app::Entry { root: true, title: "x".repeat(40 + i), row: 0 }).collect(), 0);
+        let out = sidebar((0..6).map(|i| app::Entry { depth: 0, root: true, title: "x".repeat(40 + i), row: 0 }).collect(), 0);
         let line = sidebar_line(&out, 4);
         assert_eq!(term::width(&line), 26, "{line:?}");
         assert!(line.ends_with("… │") && line.chars().filter(|&c| c == 'x').count() == 22, "{line:?}");
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(edges(12, 0), track(&[3, 4, 5]));
         assert_eq!(edges(12, 2), track(&[4, 5, 6]));
         assert_eq!(edges(12, 6), track(&[6, 7, 8]));
-        let out = sidebar((0..12).map(|i| app::Entry { root: true, title: "x".repeat(40 + i), row: 0 }).collect(), 0);
+        let out = sidebar((0..12).map(|i| app::Entry { depth: 0, root: true, title: "x".repeat(40 + i), row: 0 }).collect(), 0);
         let line = sidebar_line(&out, 4);
         assert_eq!(term::width(&line), 26, "{line:?}");
         assert!(line.ends_with("… ▕│▏") && line.chars().filter(|&c| c == 'x').count() == 20, "{line:?}");
