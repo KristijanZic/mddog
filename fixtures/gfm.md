@@ -6,6 +6,8 @@ This synthetic README exercises every GFM feature that the previewer supports. I
 
 Plain text with **bold**, *italic*, ***bold italic***, ~~strikethrough~~, ~single tilde~, `inline code`, and <kbd>Ctrl</kbd> + <kbd>C</kbd>. Water is H<sub>2</sub>O and energy is mc<sup>2</sup>.
 
+Ruby text: <ruby>日本語<rt>にほんご</rt></ruby>を<ruby>漢<rp>(</rp><rt>かん</rt><rp>)</rp>字<rp>(</rp><rt>じ</rt><rp>)</rp></ruby>で書く。
+
 A line that ends with two spaces  
 breaks here, and a backslash\
 breaks here too.

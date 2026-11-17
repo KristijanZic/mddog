@@ -99,7 +99,19 @@ fn local(dir: &Path, src: &str) -> Option<Decoded> {
 
 /// The image sources layout will ask for: all but those in closed `<details>`, which it lays out only once opened.
 pub fn sources(blocks: &[Block], out: &mut Vec<String>) {
-    let mut inls = |is: &[Inline]| out.extend(is.iter().filter_map(|i| if let Inline::Img { src, .. } = i { Some(src.clone()) } else { None }));
+    fn imgs(is: &[Inline], out: &mut Vec<String>) {
+        for i in is {
+            match i {
+                Inline::Img { src, .. } => out.push(src.clone()),
+                Inline::Ruby { base, rt } => {
+                    imgs(base, out);
+                    imgs(rt, out);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut inls = |is: &[Inline]| imgs(is, out);
     crate::render::doc::walk_shown(blocks, &mut |b| match b {
         Block::Para(is) | Block::Text(is) | Block::Heading(_, is, _) | Block::Details { summary: is, .. } => inls(is),
         Block::Table { head, rows, .. } => head.iter().chain(rows.iter().flatten()).for_each(|c| inls(c)),

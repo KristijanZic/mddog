@@ -39,6 +39,13 @@ enum AtomKind {
     Hard,
     Img(Rc<Bitmap>),
     Math(Rc<math::MBox>),
+    /// A ruby's reading, drawn centered over the `span` of atoms that follow, its baseline `lift` above theirs.
+    Ruby {
+        rt: Vec<Atom>,
+        span: f32,
+        lift: f32,
+    },
+    Gap,
     /// Obsidian's arrow after a link out of the page.
     Ext,
 }
@@ -316,7 +323,7 @@ impl<'a> Layouter<'a> {
                 let pad = 8.0 * s;
                 let bx = x + ((w - mb.w) / 2.0).max(0.0);
                 let by = *y + pad;
-                self.emit_math(&mb, bx, by + mb.asc, self.th.text);
+                self.emit_math(&mb, bx, by + mb.asc, self.th.text, true);
                 *y += h + 2.0 * pad;
             }
             Block::Mermaid(src) => self.mermaid(src, x, w, y),
@@ -697,13 +704,13 @@ impl<'a> Layouter<'a> {
         *y = top + dh + if zooms { 32.0 * s } else { 0.0 } + pad;
     }
 
-    fn emit_math(&mut self, mb: &math::MBox, x: f32, base: f32, color: Rgb) {
+    fn emit_math(&mut self, mb: &math::MBox, x: f32, base: f32, color: Rgb, noted: bool) {
         for it in &mb.items {
             match it {
                 MItem::Text { s, f, x: ix, y: iy } => {
                     let (asc, desc) = self.fonts.ascent_descent(*f);
                     let w = self.fonts.measure(*f, s);
-                    let tx = self.note_text(s);
+                    let tx = if noted { self.note_text(s) } else { NO_TEXT };
                     self.push(x + ix, base + iy - asc, w, asc + desc, Kind::Text { s: s.clone(), f: *f, color, under: false, strike: false, asc, tx });
                 }
                 MItem::Rule { x: ix, y: iy, w, h } => {
@@ -828,6 +835,10 @@ impl<'a> Layouter<'a> {
                     mx = mx.max(cur);
                     cur = 0.0;
                 }
+                AtomKind::Ruby { span, .. } => {
+                    cur += a.w;
+                    mn = mn.max(span);
+                }
                 _ => {
                     cur += a.w;
                     if !matches!(a.k, AtomKind::Space) {
@@ -850,7 +861,7 @@ impl<'a> Layouter<'a> {
             let link = match i {
                 Inline::Text(_, st) | Inline::Math(_, st) => Some(st.link),
                 Inline::Img { link, .. } => Some(*link),
-                Inline::FootRef(..) => Some(0),
+                Inline::FootRef(..) | Inline::Ruby { .. } => Some(0),
                 Inline::Soft | Inline::Hard => None,
             };
             if let Some(l) = link
@@ -860,6 +871,7 @@ impl<'a> Layouter<'a> {
             }
             match i {
                 Inline::Text(t, st) => self.text_atoms(t, st, tc, &mut out),
+                Inline::Ruby { base, rt } => self.ruby_atoms(base, rt, tc, &mut out),
                 Inline::Soft => {
                     let f = FontKey::new(tc.size, tc.bits).tracked(tc.track);
                     let w = self.fonts.measure(f, " ");
@@ -957,6 +969,40 @@ impl<'a> Layouter<'a> {
         let f = out.get(at.wrapping_sub(1)).map_or(FontKey::new(tc.size, tc.bits), |a| a.f);
         let w = 0.9 * f.px();
         out.insert(at, Atom { k: AtomKind::Ext, w, f, color, under: false, strike: false, link, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up: 0.0, down: 0.0 });
+    }
+
+    fn ruby_atoms(&mut self, base: &[Inline], rt: &[Inline], tc: &TextStyle, out: &mut Vec<Atom>) {
+        let mut b = self.atoms(base, tc);
+        let Some(first) = b.first() else { return };
+        let mut small = tc.clone();
+        small.size *= 0.5;
+        let mut r = self.atoms(rt, &small);
+        r.retain(|a| !matches!(a.k, AtomKind::Ext));
+        let (mut ra, mut rd) = self.fonts.ascent_descent(FontKey::new(small.size, small.bits));
+        for a in &r {
+            (ra, rd) = (ra.max(a.up), rd.max(a.down));
+        }
+        let bw: f32 = b.iter().map(|a| a.w).sum();
+        let pad = ((r.iter().map(|a| a.w).sum::<f32>() - bw) / 2.0).max(0.0);
+        let mut lift = 0f32;
+        for a in &b {
+            lift = lift.max(if a.up > 0.0 { a.up } else { self.fonts.ascent_descent(a.f).0 - a.shift });
+        }
+        let (f, color) = (first.f, first.color);
+        let atom = |k, w, up| Atom { k, w, f, color, under: false, strike: false, link: 0, bg: Bg::None, ox: 0.0, shift: 0.0, cjk: false, up, down: 0.0 };
+        let mut head = atom(AtomKind::Ruby { rt: r, span: bw + 2.0 * pad, lift: lift + rd }, pad, lift + ra + rd);
+        head.cjk = true;
+        out.push(head);
+        for a in &mut b {
+            a.cjk = false;
+            if matches!(a.k, AtomKind::Space) {
+                a.k = AtomKind::Word(" ".into());
+            }
+        }
+        out.append(&mut b);
+        if pad > 0.0 {
+            out.push(atom(AtomKind::Gap, pad, 0.0));
+        }
     }
 
     fn text_atoms(&mut self, t: &str, st: &Marks, tc: &TextStyle, out: &mut Vec<Atom>) {
@@ -1228,9 +1274,11 @@ impl<'a> Layouter<'a> {
                     let dh = a.up;
                     self.push(x0, base - dh, a.w, dh, Kind::Img(b.clone()));
                 }
+                AtomKind::Ruby { rt, span, lift } => self.emit_reading(rt, x0, *span, base - lift),
+                AtomKind::Gap => {}
                 AtomKind::Math(m) => {
                     let mb = m.clone();
-                    self.emit_math(&mb, x0, base + a.shift, a.color);
+                    self.emit_math(&mb, x0, base + a.shift, a.color, true);
                 }
                 AtomKind::Ext => {
                     // Lucide's external-link icon, 0.825 em at the right end of the 0.9 em, 0.25 em below the
@@ -1279,6 +1327,31 @@ impl<'a> Layouter<'a> {
         };
         let pad = if kind == Bg::Mark { 0.0 } else { 0.1 * f.px() };
         self.page.items[idx] = Item { x: x0, y: base - a - pad, w: x1 - x0, h: a + d + 2.0 * pad, clip: self.clip, k: Kind::Rect { fill, stroke, radius: r } };
+    }
+
+    fn emit_reading(&mut self, rt: &[Atom], x: f32, span: f32, base: f32) {
+        let mut rx = x + (span - rt.iter().map(|r| r.w).sum::<f32>()) / 2.0;
+        for r in rt {
+            let (fa, fd) = self.fonts.ascent_descent(r.f);
+            match &r.k {
+                AtomKind::Word(t) => {
+                    self.push(rx + r.ox, base + r.shift - fa, r.w - r.ox, fa + fd, Kind::Text { s: t.clone(), f: r.f, color: r.color, under: r.under, strike: r.strike, asc: fa, tx: NO_TEXT });
+                }
+                AtomKind::Img(b) => {
+                    self.push(rx, base - r.up, r.w, r.up, Kind::Img(b.clone()));
+                }
+                AtomKind::Math(m) => {
+                    let mb = m.clone();
+                    self.emit_math(&mb, rx, base + r.shift, r.color, false);
+                }
+                AtomKind::Ruby { rt, span, lift } => self.emit_reading(rt, rx, *span, base - lift),
+                _ => {}
+            }
+            if r.link != 0 {
+                self.emit_link(r.link, rx, rx + r.w, base - fa.max(r.up), fa.max(r.up) + fd.max(r.down));
+            }
+            rx += r.w;
+        }
     }
 
     fn emit_link(&mut self, link: u32, x0: f32, x1: f32, y: f32, h: f32) {

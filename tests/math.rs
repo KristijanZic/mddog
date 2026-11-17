@@ -26,7 +26,7 @@ fn inl(v: &[Inline], out: &mut String, dollar: &mut bool, math: &mut bool) {
             }
             Inline::FootRef(n, _) => out.push_str(&n.to_string()),
             Inline::Soft | Inline::Hard => out.push(' '),
-            Inline::Img { .. } => {}
+            Inline::Img { .. } | Inline::Ruby { .. } => {}
         }
     }
 }

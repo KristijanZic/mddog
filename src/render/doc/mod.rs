@@ -27,6 +27,7 @@ pub enum Inline {
     Img { src: String, alt: String, w: Option<f32>, link: u32 },
     Math(String, Marks),
     FootRef(usize, String),
+    Ruby { base: Vec<Inline>, rt: Vec<Inline> },
 }
 
 /// A GitHub alert's kind. Its place in this list indexes the theme's alert colors and the alert icons.
@@ -189,6 +190,13 @@ struct Builder {
     html_buf: String,
     /// Set while a raw HTML block is read, so its loose text becomes `Block::Text`.
     raw: bool,
+    ruby: Vec<RubyAt>,
+}
+
+struct RubyAt {
+    base: usize,
+    rt: Option<usize>,
+    rp: Option<usize>,
 }
 
 impl Builder {
@@ -232,6 +240,7 @@ impl Builder {
         if self.in_summary {
             return;
         }
+        self.ruby.clear();
         let v = std::mem::take(&mut self.inl);
         let v = finish_inlines(v, &mut self.links);
         if v.iter().any(|i| !matches!(i, Inline::Text(t, _) if t.trim().is_empty()) && !matches!(i, Inline::Soft)) {
@@ -409,6 +418,15 @@ impl Builder {
             "sup" => self.cnt.sup += 1,
             "u" | "ins" => self.cnt.under += 1,
             "mark" => self.cnt.mark += 1,
+            "ruby" => self.ruby.push(RubyAt { base: self.inl.len(), rt: None, rp: None }),
+            "rt" | "rp" if !self.ruby.is_empty() => {
+                self.end_rp();
+                self.end_rt();
+                let at = Some(self.inl.len());
+                if let Some(r) = self.ruby.last_mut() {
+                    if name == "rt" { r.rt = at } else { r.rp = at }
+                }
+            }
             "tr" | "li" | "ul" | "ol" | "table" | "blockquote" => {
                 if !self.inl.is_empty() {
                     self.inl.push(Inline::Hard);
@@ -446,7 +464,39 @@ impl Builder {
             "sup" => dec(&mut self.cnt.sup),
             "u" | "ins" => dec(&mut self.cnt.under),
             "mark" => dec(&mut self.cnt.mark),
+            "rt" => self.end_rt(),
+            "rp" => self.end_rp(),
+            "ruby" => {
+                self.end_rp();
+                self.end_rt();
+                self.ruby.pop();
+            }
             _ => {}
+        }
+    }
+
+    fn end_rp(&mut self) {
+        if let Some(at) = self.ruby.last_mut().and_then(|r| r.rp.take()) {
+            self.inl.truncate(at.min(self.inl.len()));
+        }
+    }
+
+    fn end_rt(&mut self) {
+        let len = self.inl.len();
+        let Some(top) = self.ruby.last_mut() else { return };
+        let Some(r) = top.rt.take() else { return };
+        let b = top.base.min(len);
+        let rt = self.inl.split_off(r.clamp(b, len));
+        let base = self.inl.split_off(b);
+        let (bv, rv) = (ruby_part(base.clone(), &mut self.links), ruby_part(rt, &mut self.links));
+        if rv.is_empty() {
+            self.inl.extend(base);
+        } else if !bv.is_empty() {
+            self.inl.push(Inline::Ruby { base: bv, rt: rv });
+        }
+        let len = self.inl.len();
+        if let Some(top) = self.ruby.last_mut() {
+            top.base = len;
         }
     }
 
@@ -454,6 +504,30 @@ impl Builder {
         self.links.push(url);
         self.links.len() as u32
     }
+}
+
+fn ruby_part(v: Vec<Inline>, links: &mut Vec<String>) -> Vec<Inline> {
+    let mut st = Marks::default();
+    let v: Vec<Inline> = v
+        .into_iter()
+        .map(|i| match i {
+            Inline::Soft | Inline::Hard => Inline::Text(" ".into(), st),
+            Inline::Text(_, s) => {
+                st = s;
+                i
+            }
+            _ => i,
+        })
+        .collect();
+    let mut v = finish_inlines(v, links);
+    if let Some(Inline::Text(t, _)) = v.first_mut() {
+        *t = t.trim_start().to_string();
+    }
+    if let Some(Inline::Text(t, _)) = v.last_mut() {
+        *t = t.trim_end().to_string();
+    }
+    v.retain(|i| !matches!(i, Inline::Text(t, _) if t.is_empty()));
+    v
 }
 
 /// Marks where inline HTML sat in merged text. Math never spans it, and it is dropped before layout.
@@ -781,6 +855,7 @@ pub fn plain(v: &[Inline]) -> String {
             Inline::Soft | Inline::Hard => s.push(' '),
             Inline::Math(t, _) => s.push_str(t),
             Inline::Img { alt, .. } => s.push_str(alt),
+            Inline::Ruby { base, .. } => s.push_str(&plain(base)),
             Inline::FootRef(..) => {}
         }
     }
@@ -830,6 +905,7 @@ pub fn parse(src: &str) -> Doc {
         in_image: None,
         html_buf: String::new(),
         raw: false,
+        ruby: vec![],
     };
     let mut meta = None;
     let starts: Vec<usize> = std::iter::once(0).chain(src.match_indices('\n').map(|(i, _)| i + 1)).collect();
