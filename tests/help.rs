@@ -271,6 +271,28 @@ fn ctrl_c_in_the_editor_keeps_the_viewer() {
 }
 
 #[test]
+fn the_background_is_filled_after_the_editor() {
+    let dir = scratch("edit-bg");
+    std::fs::write(dir.join("mddog/config.toml"), "theme = \"obsidian-dark\"\n").unwrap();
+    let file = dir.join("a.md");
+    std::fs::write(&file, "# One\n").unwrap();
+    let env = [("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("EDITOR", "sh -c 'echo edited >> \"$0\"'")];
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 80, &env);
+    wait_for(&out, 0, b"a=p,");
+    tty.write_all(b"e").unwrap();
+    let left = wait_for(&out, 0, b"\x1b[?1049l");
+    let back = wait_for(&out, left, b"\x1b[?1049h");
+    let shown = wait_for(&out, back, b"Reloaded");
+    let clear = format!("{}\x1b[2J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
+    let filled = find(&out.lock().unwrap()[back..shown], clear.as_bytes()).is_some();
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(filled, "the screen kept the terminal's background after the editor");
+}
+
+#[test]
 fn sigint_outside_the_editor_quits() {
     let Viewer { mut child, out, .. } = open(GFM, 80, &[]);
     wait_for(&out, 0, b"a=p,");

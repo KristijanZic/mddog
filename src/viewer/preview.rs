@@ -162,9 +162,9 @@ pub struct Preview {
     copy_until: Option<Instant>,
     notice_until: Option<Instant>,
     quit_armed: Option<Instant>,
-    /// Text cells may hold something the page doesn't cover: help or the file list, or a sidebar or status row
-    /// from before a new geometry. The next page frame clears the screen first.
-    help_drawn: bool,
+    /// Set when cells outside the page may hold old text or the terminal's own background, after help, the file list,
+    /// a resize, or a return from the editor. The next frame clears the screen in the theme color.
+    needs_clear: bool,
     stdin: bool,
     base: PathBuf,
     doc_px: u32,
@@ -351,7 +351,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         copy_until: None,
         notice_until: None,
         quit_armed: None,
-        help_drawn: false,
+        needs_clear: false,
         stdin,
         base,
         doc_px: 0,
@@ -1302,7 +1302,7 @@ impl Preview {
         self.img_col = toc;
         self.img_cols = self.size.cols.saturating_sub(toc).max(1);
         // Some terminals draw the old text over the new tiles, or keep it at rows the status row left.
-        self.help_drawn |= before != (self.size, toc);
+        self.needs_clear |= before != (self.size, toc);
         (toc, f64::from(u32::from(self.img_cols) * self.cell_w) / self.scale)
     }
 
@@ -1414,7 +1414,7 @@ impl Preview {
             let mut out = frees;
             self.cache.free_all(&mut out);
             chrome::help(&mut out, self.size.cols, self.size.rows, &mut self.app.help_top, &self.theme.palette);
-            self.help_drawn = true;
+            self.needs_clear = true;
             self.chrome().draw(&mut out);
             if self.probe.sync {
                 out.push_str(term::SYNC_END);
@@ -1429,7 +1429,7 @@ impl Preview {
             let mut out = frees;
             self.cache.free_all(&mut out);
             p.draw(&mut out, self.size.cols, self.size.rows, std::time::SystemTime::now(), &config::theme().palette);
-            self.help_drawn = true;
+            self.needs_clear = true;
             if self.probe.sync {
                 out.push_str(term::SYNC_END);
             }
@@ -1437,7 +1437,7 @@ impl Preview {
             self.tty.flush();
             return;
         }
-        if std::mem::take(&mut self.help_drawn) {
+        if std::mem::take(&mut self.needs_clear) {
             frees.push_str(&format!("{}\x1b[2J", self.theme.palette.reset()));
         }
         let mut snap = snapper(&self.engine, self.scale);
@@ -1648,6 +1648,7 @@ impl Preview {
             let _ = self.tx.send(e);
         }
         self.paused.store(false, Ordering::SeqCst);
+        self.needs_clear = true;
         if self.opened {
             self.rerender(read);
         } else {
