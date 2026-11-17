@@ -431,7 +431,7 @@ impl Picker {
         }
         let (dim, text, bright) = (fg(pal.fg_muted), fg(pal.fg), format!("\x1b[1m{}", fg(pal.fg_bright)));
         let reset = pal.reset();
-        out.push_str(&format!("{reset}\x1b[2J"));
+        out.push_str(&format!("{reset}{}", crate::term::CLEAR));
         let count = if let Some(n) = &self.note {
             term::printable(n)
         } else if !self.done {
@@ -526,7 +526,7 @@ mod tests {
             assert!(drawn.contains(&c), "{c:?} not drawn");
         }
         assert!(drawn.iter().all(|c| [light.bg, light.fg, light.fg_muted, light.fg_bright, light.selection_bg, light.bar_bg, light.border].contains(c)), "{drawn:?}");
-        assert!(out.starts_with(&format!("\x1b[0m{}\x1b[2J", crate::theme::bg(light.bg))));
+        assert!(out.starts_with(&format!("\x1b[0m{}\x1b[H\x1b[J", crate::theme::bg(light.bg))));
     }
 
     fn item(rel: &str, title: &str, age_s: u64) -> Item {

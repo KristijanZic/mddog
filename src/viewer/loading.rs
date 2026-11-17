@@ -62,7 +62,8 @@ impl Look {
 #[derive(Clone, Copy, Default)]
 struct Tune {
     scale: Option<f64>,
-    cell: Option<(u32, u32)>,
+    /// The probe's cell, and the terminal size it holds for.
+    cell: Option<((u32, u32), Size)>,
 }
 
 /// How far the first frame has got.
@@ -107,11 +108,12 @@ impl Loader {
             let mut out = File::from(fd);
             let fd = out.as_raw_fd();
             let theme = config::theme();
-            // A terminal too small to draw in waits, so the minimum time starts at a visible frame.
+            // A terminal it can't draw in yet waits, so the minimum time starts at a visible frame.
+            let rex = term::rex_by_env();
             let mut last = None;
             for i in 0.. {
                 let size = term::size_of(fd);
-                if size.cols == 0 || size.rows < 2 {
+                if !drawable(size, rex) {
                     if s.stop.load(Ordering::Acquire) {
                         break;
                     }
@@ -131,8 +133,7 @@ impl Loader {
                 let look = {
                     let t = *lock(&s.tune);
                     let scale = t.scale.unwrap_or(crate::term::screen::SCALE_GUESS);
-                    let cell = t.cell.or_else(|| size.cell_px(scale)).unwrap_or_else(|| term::fallback_cell(scale));
-                    Look::new(theme, scale, cell)
+                    Look::new(theme, scale, cell_for(t, size, scale))
                 };
                 let bytes = frame(i, &name, size, &look, last != Some((size, look)));
                 {
@@ -151,10 +152,10 @@ impl Loader {
         Loader { shared, thread: Some(thread) }
     }
 
-    /// Gives the skeleton what the terminal probe found: the screen scale and the cell size in
-    /// device pixels.
-    pub fn tune(&self, scale: f64, cell: (u32, u32)) {
-        *lock(&self.shared.tune) = Tune { scale: Some(scale), cell: Some(cell) };
+    /// Gives the skeleton what the terminal probe found: the screen scale, and the cell size in device pixels for
+    /// a terminal of `size`.
+    pub fn tune(&self, scale: f64, cell: (u32, u32), size: Size) {
+        *lock(&self.shared.tune) = Tune { scale: Some(scale), cell: Some((cell, size)) };
     }
 
     /// Stops the skeleton, after it has been up for `MIN_SHOWN` if it was drawn.
@@ -211,6 +212,19 @@ use Line::*;
 const PAGE: &[Line] = &[Head(42), Gap, Text(100), Text(96), Text(58), Gap, Text(100), Text(88), Text(34), Gap];
 const REPEAT: &[Line] = &[Code(0), Code(30), Code(54), Code(46), Code(20), Code(0), Gap, Head(26), Gap, Text(100), Text(97), Text(92), Text(66), Gap, Text(100), Text(48), Gap];
 
+/// Whether the skeleton can draw in a terminal of `size`: not one too small, nor a Rex block at its stand-in size,
+/// which Rex shows at the top of the real pane until the real size comes.
+fn drawable(size: Size, rex: bool) -> bool {
+    size.cols > 0 && size.rows >= 2 && !(rex && size.unknown(true))
+}
+
+/// The cell in device pixels for a terminal of `size`: the probe's, else the window's. A size that changed since the
+/// probe, such as a Rex block's real size after its stand-in, has new cells.
+fn cell_for(t: Tune, size: Size, scale: f64) -> (u32, u32) {
+    let probed = t.cell.filter(|&(_, at)| at == size).map(|(c, _)| c);
+    probed.or_else(|| size.cell_px(scale)).unwrap_or_else(|| term::fallback_cell(scale))
+}
+
 /// Draws frame `i` of the skeleton for a terminal of `size`, with the status row at the bottom.
 /// `full` clears the screen first; later frames redraw only the bars.
 pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> String {
@@ -222,7 +236,7 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
     let mut out = String::from(term::SYNC_BEGIN);
     if full {
         let (line, w) = term::fit(&format!(" {name} "), cols);
-        out.push_str(&format!("\x1b[0m{}\x1b[2J\x1b[{};1H{}{}{line}{}\x1b[0m", sgr(4, look.bg), size.rows, sgr(4, look.bar_bg), sgr(3, look.muted), " ".repeat(cols - w)));
+        out.push_str(&format!("\x1b[0m{}{}\x1b[{};1H{}{}{line}{}\x1b[0m", sgr(4, look.bg), term::CLEAR, size.rows, sgr(4, look.bar_bg), sgr(3, look.muted), " ".repeat(cols - w)));
     }
     let pad = usize::from(look.pad_cols).min(cols / 4);
     let width = cols - 2 * pad;
@@ -301,7 +315,7 @@ mod tests {
     #[test]
     fn full_frame_paints_the_page_and_the_status_row() {
         let f = frame(0, "a.md", SIZE, &DARK, true);
-        assert!(f.starts_with(&format!("\x1b[?2026h\x1b[0m{}\x1b[2J\x1b[11;1H", theme::bg(DARK.bg))));
+        assert!(f.starts_with(&format!("\x1b[?2026h\x1b[0m{}\x1b[H\x1b[J\x1b[11;1H", theme::bg(DARK.bg))));
         assert!(f.contains(&format!(" a.md {}", " ".repeat(34))));
         assert!(f.ends_with("\x1b[0m\x1b[?2026l"));
         assert!(!frame(0, "a.md", SIZE, &DARK, false).contains("a.md"));
@@ -328,6 +342,23 @@ mod tests {
         assert_ne!(a, b);
         assert_eq!(a, frame(SWEEP, "a.md", SIZE, &DARK, false));
         assert!(b.contains(&theme::fg(DARK.shine())));
+    }
+
+    #[test]
+    fn waits_for_a_rex_block_s_real_size() {
+        let stand_in = Size { cols: 80, rows: 24, xpix: 640, ypix: 384 };
+        assert!(!drawable(stand_in, true) && drawable(stand_in, false));
+        assert!(!drawable(Size { cols: 80, rows: 24, xpix: 0, ypix: 0 }, true));
+        assert!(drawable(Size { cols: 58, rows: 42, xpix: 1102, ypix: 1596 }, true));
+    }
+
+    #[test]
+    fn a_new_size_gets_its_own_cells() {
+        let stand_in = Size { cols: 80, rows: 24, xpix: 640, ypix: 384 };
+        let real = Size { cols: 58, rows: 42, xpix: 1102, ypix: 1596 };
+        let t = Tune { scale: Some(2.0), cell: Some(((8, 16), stand_in)) };
+        assert_eq!(cell_for(t, stand_in, 2.0), (8, 16));
+        assert_eq!(cell_for(t, real, 2.0), (19, 38), "the skeleton kept the stand-in cells");
     }
 
     #[test]

@@ -23,8 +23,16 @@ pub fn tile_rows(width: u32, cell_h: u32) -> u32 {
     (TILE_BYTES as u32 / (width.max(1) * 4) / cell_h).min(MAX_IMAGE_SIDE / cell_h)
 }
 
-pub fn storage_limit(herdr: bool) -> usize {
-    if herdr { 56 << 20 } else { 300 << 20 }
+/// Rex keeps 128 MiB of images per pane and drops the oldest past that without telling. The limit leaves room for
+/// one more tile, which is sent before the tiles it replaces are freed.
+pub fn storage_limit(herdr: bool, rex: bool) -> usize {
+    if herdr {
+        56 << 20
+    } else if rex {
+        (128 << 20) - TILE_BYTES
+    } else {
+        300 << 20
+    }
 }
 
 const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

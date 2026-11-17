@@ -154,7 +154,7 @@ impl Renderer {
             })?
         };
         self.round = round;
-        let keep = kitty::storage_limit(term::herdr_by_env()) / kitty::TILE_BYTES;
+        let keep = kitty::storage_limit(term::herdr_by_env(), term::rex_by_env()) / kitty::TILE_BYTES;
         let line = serde_json::to_string(&Out { keep, tiles }).map_err(|e| e.to_string())?;
         let mut out = std::io::stdout().lock();
         if writeln!(out, "{line}").and_then(|()| out.flush()).is_err() {

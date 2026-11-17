@@ -35,6 +35,12 @@ impl Size {
         self.cell_px_in(if guess { scale } else { 1.0 })
     }
 
+    /// Whether the size says nothing yet about the pane: no pixels, or under Rex the 80x24 cells at 640x384 px that
+    /// it gives a block opened from its CLI until a window shows it.
+    pub fn unknown(&self, rex: bool) -> bool {
+        self.xpix == 0 || self.ypix == 0 || (rex && *self == Size { cols: 80, rows: 24, xpix: 640, ypix: 384 })
+    }
+
     /// The cell, with the window's pixel size taken as `unit` device pixels each.
     fn cell_px_in(self, unit: f64) -> Option<(u32, u32)> {
         let (cols, rows) = (u32::from(self.cols), u32::from(self.rows));
@@ -47,6 +53,11 @@ impl Size {
 /// The cell to assume when the terminal reports no pixel size: 8 by 16 CSS px.
 pub fn fallback_cell(scale: f64) -> (u32, u32) {
     ((8.0 * scale) as u32, (16.0 * scale) as u32)
+}
+
+/// Rex, by the environment alone.
+pub fn rex_by_env() -> bool {
+    std::env::var("TERM_PROGRAM").as_deref() == Ok("rex")
 }
 
 /// herdr, by the environment alone, for a run that can't ask the terminal.
@@ -124,9 +135,14 @@ impl Probe {
         self.version.starts_with("ghostty")
     }
 
+    /// Rex, which answers `XTVERSION` as `rex 0.1.0-preview.20`.
+    pub fn rex(&self) -> bool {
+        self.version.starts_with("rex ") || rex_by_env()
+    }
+
     /// How many bytes of images the terminal keeps.
     pub fn storage_limit(&self) -> usize {
-        kitty::storage_limit(self.herdr())
+        kitty::storage_limit(self.herdr(), self.rex())
     }
 
     /// The hand pointer's name. iTerm2 knows only X11 names, and Ghostty has no `hand2`.
@@ -274,18 +290,28 @@ pub fn size_of(fd: i32) -> Size {
     Size { cols: ws.ws_col, rows: ws.ws_row, xpix: ws.ws_xpixel, ypix: ws.ws_ypixel }
 }
 
+/// Clears the screen in the current background color. Not `CSI 2 J`: Rex frees every stored image on it, which kitty
+/// does only for images without a placement, so tiles the viewer keeps would have to go again.
+pub const CLEAR: &str = "\x1b[H\x1b[J";
+
 /// Starts a synchronized update (mode 2026): the terminal shows nothing it gets until `SYNC_END`.
 pub const SYNC_BEGIN: &str = "\x1b[?2026h";
 pub const SYNC_END: &str = "\x1b[?2026l";
 
-/// The alternate screen, cleared, with no line wrap and no cursor, and mouse and key reports on.
+/// The alternate screen, cleared, with no line wrap and no cursor, and mouse and key reports on. It saves the
+/// window title, which `title` then changes.
 pub fn enter(pixel_mouse: bool) -> String {
-    format!("\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H{MOUSE_ON}{KEYS_ON}{}", if pixel_mouse { PIXEL_MOUSE_ON } else { "" })
+    format!("\x1b[22;0t\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[2J\x1b[H{MOUSE_ON}{KEYS_ON}{}", if pixel_mouse { PIXEL_MOUSE_ON } else { "" })
 }
 
-/// Undoes `enter`.
+/// Undoes `enter`. Rex keeps no saved titles, so an empty title first gives it back its own.
 pub fn leave() -> String {
-    format!("{MOUSE_OFF}{KEYS_OFF}\x1b[0m\x1b[2J\x1b[?25h\x1b[?7h\x1b[?1049l")
+    format!("{MOUSE_OFF}{KEYS_OFF}\x1b[0m\x1b[2J\x1b[?25h\x1b[?7h\x1b[?1049l\x1b]2;\x1b\\\x1b[23;0t")
+}
+
+/// Sets the window title, which terminals such as Rex show on the tab.
+pub fn title(text: &str) -> String {
+    format!("\x1b]2;{}\x1b\\", printable(text))
 }
 
 pub fn on_panic_restore(saved: Option<libc::termios>) {
@@ -850,6 +876,22 @@ mod tests {
         assert_eq!(p.version, "");
         let (p, _) = parse_probe(b"\x1bP>|iTerm2 3.6.6\x1b\\\x1b[?62;22c");
         assert_eq!(p.hand(), "hand2");
+    }
+
+    #[test]
+    fn probe_finds_rex_and_its_image_quota() {
+        // Rex 0.1.0-preview.20's own answer.
+        let (p, _) = parse_probe(b"\x1bP>|rex 0.1.0-preview.20\x1b\\\x1b[?62;22c");
+        assert!(p.rex() && !p.herdr());
+        assert!(p.storage_limit() + kitty::TILE_BYTES <= 128 << 20, "tiles past Rex's 128 MiB quota are dropped");
+    }
+
+    #[test]
+    fn rex_placeholder_size_is_unknown_only_under_rex() {
+        let placeholder = Size { cols: 80, rows: 24, xpix: 640, ypix: 384 };
+        assert!(placeholder.unknown(true) && !placeholder.unknown(false));
+        assert!(Size { cols: 80, rows: 24, xpix: 0, ypix: 0 }.unknown(false));
+        assert!(!Size { cols: 100, rows: 40, xpix: 1800, ypix: 1520 }.unknown(true));
     }
 
     #[test]

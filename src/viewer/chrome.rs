@@ -132,7 +132,7 @@ pub fn help(out: &mut String, cols: u16, rows: u16, top: &mut u32, p: &Palette) 
     *top = (*top).min(max);
     let top = *top as usize;
     let reset = p.reset();
-    out.push_str(&format!("{reset}\x1b[2J"));
+    out.push_str(&format!("{reset}{}", crate::term::CLEAR));
     for r in 0..rows {
         let i = top + r;
         let Some(l) = lines.get(i) else { break };

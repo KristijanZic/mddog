@@ -186,6 +186,8 @@ pub struct Preview {
     opened: bool,
     picker: Option<Picker>,
     listing: bool,
+    /// The window title last sent, cleared when the terminal comes back from the editor.
+    titled: String,
     history: Vec<Visit>,
     /// Where `render_doc` puts the page instead of the top.
     restore_at: Option<Place>,
@@ -315,9 +317,9 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     let scale = display;
     let (cell_w, cell_h) = probe.cell_px(size, display);
     if let Some(l) = &loader {
-        l.tune(scale, (cell_w, cell_h));
+        l.tune(scale, (cell_w, cell_h), size);
     }
-    let cache = Cache::new(probe.storage_limit(), probe.herdr(), probe.medium(), 1 + (std::process::id() % 1000) * 1000);
+    let cache = Cache::new(probe.storage_limit(), probe.herdr() || probe.rex(), probe.medium(), 1 + (std::process::id() % 1000) * 1000);
     let base = crate::render::images::base_dir(&file, stdin);
     let mut p = Preview {
         watcher: None,
@@ -371,6 +373,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         quit: false,
         opened: picker.is_none(),
         listing: picker.is_some(),
+        titled: String::new(),
         picker,
         history: Vec::new(),
         restore_at: None,
@@ -521,7 +524,10 @@ impl Preview {
                 false
             }
             Event::Resize => {
-                self.resize.poke(Instant::now());
+                // The first real size of a Rex block skips the wait: nothing of the page shows until it comes.
+                let now = Instant::now();
+                let waiting = self.probe.rex() && self.size.unknown(true);
+                self.resize.poke(if waiting { now.checked_sub(app::RESIZE_DEBOUNCE).unwrap_or(now) } else { now });
                 self.glide.take().is_some()
             }
             Event::Gone(kitty::END_CHECK) => {
@@ -1262,7 +1268,7 @@ impl Preview {
         let (_, css_width) = self.fit();
         self.engine.rescale(self.scale, css_width);
         if let Some(l) = &self.loader {
-            l.tune(self.scale, (self.cell_w, self.cell_h));
+            l.tune(self.scale, (self.cell_w, self.cell_h), self.size);
         }
     }
 
@@ -1271,9 +1277,11 @@ impl Preview {
     /// cell height, so the page zooms with the terminal's font.
     fn take_size(&mut self) {
         self.size = self.tty.size();
-        // Rex starts a block opened from its CLI with no pixel size and a stand-in cell until a window shows it.
-        // The font zoom counts from the first size with pixels, or else the first real cell reads as a zoom.
-        if (self.start.xpix == 0 || self.start.ypix == 0) && self.size.xpix > 0 && self.size.ypix > 0 {
+        // Rex starts a block opened from its CLI at a stand-in size until a window shows it: no pixels before Rex
+        // 0.1.0-preview.15, 640x384 px since. The font zoom counts from the first real size, or else the first real
+        // cell reads as a zoom.
+        let rex = self.probe.rex();
+        if self.start.unknown(rex) && !self.size.unknown(rex) {
             self.start = self.size;
         }
         (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, self.display);
@@ -1390,6 +1398,11 @@ impl Preview {
     }
 
     fn show(&mut self) {
+        // Rex gives a block opened from its CLI a stand-in size until a window shows it, then stretches the images
+        // placed by then over the same cells. The page waits for the real size, and the loading skeleton stays.
+        if self.probe.rex() && self.size.unknown(true) && !self.listing && !self.app.help {
+            return;
+        }
         let t0 = Instant::now();
         // A glide that ended before its first frame (a later key, a resize, a re-layout) leaves its path unused.
         let mut keep = std::mem::take(&mut self.path);
@@ -1403,9 +1416,14 @@ impl Preview {
         if self.probe.sync {
             frees.push_str(term::SYNC_BEGIN);
         }
+        let title = if self.listing { "mddog" } else { self.name.as_str() };
+        if self.titled != title {
+            frees.push_str(&term::title(title));
+            self.titled = title.to_string();
+        }
         let loader = self.loader.take();
         if loader.is_some() {
-            frees.push_str(&format!("{}\x1b[2J", self.theme.palette.reset()));
+            frees.push_str(&format!("{}{}", self.theme.palette.reset(), term::CLEAR));
         }
         let todo = if self.app.help { vec![] } else { self.cache.plan_bands(&vis, self.last_event.elapsed() >= FOLD_IDLE, self.phase, self.cell_h, &mut frees) };
         self.cache.free_stale(&mut frees);
@@ -1438,7 +1456,7 @@ impl Preview {
             return;
         }
         if std::mem::take(&mut self.needs_clear) {
-            frees.push_str(&format!("{}\x1b[2J", self.theme.palette.reset()));
+            frees.push_str(&format!("{}{}", self.theme.palette.reset(), term::CLEAR));
         }
         let mut snap = snapper(&self.engine, self.scale);
         let first = !keep.is_empty();
@@ -1643,6 +1661,7 @@ impl Preview {
         let _ = self.tty.raw();
         self.tty.write(term::enter(self.probe.pixel_mouse).as_bytes());
         self.tty.flush();
+        self.titled.clear();
         let pending: Vec<Event> = std::iter::from_fn(|| self.rx.try_recv().ok()).filter(|e| !matches!(e, Event::FileChanged)).collect();
         for e in pending {
             let _ = self.tx.send(e);
@@ -1755,7 +1774,7 @@ impl Preview {
     /// Draws a skeleton over the screen if the next page is slow to show. `show` takes it down.
     fn start_loader(&mut self, name: &str) {
         let l = Loader::start(self.tty.fd, name);
-        l.tune(self.scale, (self.cell_w, self.cell_h));
+        l.tune(self.scale, (self.cell_w, self.cell_h), self.size);
         self.loader = Some(l);
     }
 

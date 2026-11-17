@@ -90,8 +90,12 @@ fn start_exe(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>
 
 #[expect(clippy::too_many_arguments, reason = "a test helper; each caller sets a different mix")]
 fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, cols: u16, cell: (u16, u16), reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
+    let size = libc::winsize { ws_row: 40, ws_col: cols, ws_xpixel: cols * cell.0, ws_ypixel: 40 * cell.1 };
+    start_sized(exe, args, dir, size, reply, env, job)
+}
+
+fn start_sized(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, mut size: libc::winsize, reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
     let (mut master, mut slave) = (0, 0);
-    let mut size = libc::winsize { ws_row: 40, ws_col: cols, ws_xpixel: cols * cell.0, ws_ypixel: 40 * cell.1 };
     // SAFETY: each pointer is a valid out-pointer or null, which openpty allows for the name and termios.
     assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
     // SAFETY: openpty returned a new fd that nothing else owns.
@@ -283,7 +287,7 @@ fn the_background_is_filled_after_the_editor() {
     let left = wait_for(&out, 0, b"\x1b[?1049l");
     let back = wait_for(&out, left, b"\x1b[?1049h");
     let shown = wait_for(&out, back, b"Reloaded");
-    let clear = format!("{}\x1b[2J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
+    let clear = format!("{}\x1b[H\x1b[J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
     let filled = find(&out.lock().unwrap()[back..shown], clear.as_bytes()).is_some();
     tty.write_all(b"q").unwrap();
     let _ = exits_within(&mut child, LIMIT);
@@ -460,6 +464,77 @@ fn the_page_zooms_with_the_terminal_font() {
 }
 
 #[test]
+fn a_resize_clears_without_erase_display_2() {
+    // Rex frees every stored image on `CSI 2 J`, so the tiles a shorter pane keeps would all go again.
+    let dir = scratch("clear");
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, tty, out } = open(GFM, 100, &env);
+    wait_for(&out, 0, b"a=p,");
+    let sent = out.lock().unwrap().len();
+    resize(&tty, libc::winsize { ws_row: 30, ws_col: 100, ws_xpixel: 100 * 18, ws_ypixel: 30 * 38 });
+    wait_trace(&trace, "mark resize");
+    let cleared = cleared_then_placed(&out, sent);
+    let o = out.lock().unwrap()[sent..].to_vec();
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(cleared, "the resize didn't clear the screen");
+    assert!(find(&o, b"\x1b[2J").is_none(), "the resize cleared with CSI 2 J");
+}
+
+#[test]
+fn the_title_names_the_file_and_comes_back_on_quit() {
+    // Rex and other terminals name the tab after the title, which else says only `mdd`.
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &[]);
+    wait_for(&out, 0, b"a=p,");
+    let titled = wait_for(&out, 0, b"\x1b]2;gfm.md\x1b\\");
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let o = out.lock().unwrap().clone();
+    let saved = find(&o, b"\x1b[22;0t").unwrap();
+    assert!(saved < titled, "the title was set before the old one was saved");
+    assert!(find(&o[titled..], b"\x1b]2;\x1b\\\x1b[23;0t").is_some(), "quitting didn't bring the old title back");
+}
+
+#[test]
+fn no_tiles_go_to_a_rex_pane_before_it_has_a_real_size() {
+    // Rex stretches placed images over the same cells when the real cells come, so a page drawn at the stand-in
+    // size flashes too big before it is drawn again.
+    let dir = scratch("rex-unsized");
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("TERM_PROGRAM", "rex")];
+    let size = libc::winsize { ws_row: 24, ws_col: 80, ws_xpixel: 640, ws_ypixel: 384 };
+    let Viewer { mut child, tty, out } = start_sized(env!("CARGO_BIN_EXE_mdd").as_ref(), &[GFM], None, size, probe_reply((8, 16)), &env, false);
+    wait_trace(&trace, "terminal probed");
+    std::thread::sleep(Duration::from_millis(1000));
+    let early = find(&out.lock().unwrap(), b"a=p,").is_some();
+    resize(&tty, libc::winsize { ws_row: 40, ws_col: 100, ws_xpixel: 100 * 18, ws_ypixel: 40 * 38 });
+    wait_for(&out, 0, b"a=p,");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(!early, "tiles went to the pane at Rex's stand-in size");
+}
+
+#[test]
+fn a_rex_placeholder_size_at_launch_is_no_font_zoom() {
+    // Rex starts a block it opens from the CLI at 80x24 and 640x384 px, an 8x16 cell, until a window shows it.
+    // The real cells that come then are the pane's size, not a font zoom.
+    let dir = scratch("rex-placeholder");
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("TERM_PROGRAM", "rex")];
+    let size = libc::winsize { ws_row: 24, ws_col: 80, ws_xpixel: 640, ws_ypixel: 384 };
+    let Viewer { mut child, tty, out } = start_sized(env!("CARGO_BIN_EXE_mdd").as_ref(), &[GFM], None, size, probe_reply((8, 16)), &env, false);
+    wait_trace(&trace, "terminal probed");
+    resize(&tty, libc::winsize { ws_row: 40, ws_col: 100, ws_xpixel: 100 * 18, ws_ypixel: 40 * 38 });
+    wait_trace(&trace, "mark resize");
+    wait_for(&out, 0, b"a=p,");
+    let shown = page_after(&trace, "mark resize");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(shown, (2.0, 900.0), "the first real size was taken as a font zoom");
+}
+
+#[test]
 fn a_pane_without_pixels_at_launch_is_no_font_zoom() {
     // Rex starts a block it opens from the CLI at 80x24, with no pixel size and an 8x16 cell, until a window
     // shows it. The real cells that come then are the pane's size, not a font zoom.
@@ -578,7 +653,7 @@ fn cleared_then_placed(out: &Mutex<Vec<u8>>, before: usize) -> bool {
     let end = Instant::now() + LIMIT;
     loop {
         let o = out.lock().unwrap();
-        if let Some(c) = find(&o[before..], b"\x1b[2J")
+        if let Some(c) = find(&o[before..], b"\x1b[H\x1b[J")
             && find(&o[before + c..], b"a=p,").is_some()
         {
             return true;
@@ -666,7 +741,7 @@ fn help_follows_an_appearance_change() {
     let before = out.lock().unwrap().len();
     tty.write_all(b"?").unwrap();
     let keys = wait_for(&out, before, b"mddog keys");
-    let clear = format!("{}\x1b[2J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
+    let clear = format!("{}\x1b[H\x1b[J", mddog::theme::builtin("obsidian-dark").unwrap().palette.reset());
     let dark = find(&out.lock().unwrap()[before..keys], clear.as_bytes()).is_some();
     tty.write_all(b"q").unwrap();
     let _ = exits_within(&mut child, LIMIT);

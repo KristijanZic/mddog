@@ -86,7 +86,7 @@ The interactive viewer and the file list.
 - `preview.rs`: `Preview`, the viewer itself. It runs the event loop, owns the `Engine`, writes to the terminal, and carries out the actions that `App` returns. `Preview::show` is the one path that draws the page.
 - `app.rs`: `App`, the state machine that turns a key or mouse event into `Action`s (scroll, glide, search, contents, history).
 - `chrome.rs` and `keys.rs`: the status row, the contents sidebar, and the `?` screen, drawn as terminal text from `App`. `keys.rs` is the one list of keys that the `?` screen shows.
-- `cache.rs`: `Cache`, the tiles the terminal holds: their ids, the bytes they use, which to free, and the bands used under herdr.
+- `cache.rs`: `Cache`, the tiles the terminal holds: their ids, the bytes they use, which to free, and the bands used under herdr and Rex.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.
 - `picker.rs`: the file list.
@@ -196,7 +196,7 @@ Most behavior is tested below the terminal. `App` and the chrome are tested with
 | Overlay | What the raster draws on top of the display list: search marks, the selection, hover, wide-block offsets, and an expanded diagram. |
 | Tile | A pane-wide strip of the page, sent to the terminal as one image. Headless mode writes it as one PNG file, or with `--webp` as two WebP files: a sharp copy and a small one. |
 | Wide block | A code block or table wider than the page. It scrolls sideways on its own. The page itself never does. |
-| Band | Under herdr, an image of a tile's changed rows, placed over the tile so that the whole tile need not be sent again. |
+| Band | Under herdr and Rex, an image of a tile's changed rows, placed over the tile so that the whole tile need not be sent again. |
 | Glide | An eased scroll to a jump target, drawn at pixel offsets. |
-| Storage limit | The most tile bytes mddog lets the terminal hold. Past it, the tiles farthest from the view are freed. Tiles in view are never freed, so a view larger than the limit goes over it. A terminal with a smaller quota, such as Rex, deletes images without telling mddog. mddog learns of it when a placement answers `ENOENT`. It then asks about every other tile it holds, sends the dropped ones again, and lowers the limit to what the terminal still holds. |
+| Storage limit | The most tile bytes mddog lets the terminal hold. Past it, the tiles farthest from the view are freed. Tiles in view are never freed, so a view larger than the limit goes over it. mddog starts at the quota of the terminals it knows: herdr, Rex, and the rest. A terminal with a smaller quota deletes images without telling mddog. mddog learns of it when a placement answers `ENOENT`. It then asks about every other tile it holds, sends the dropped ones again, and lowers the limit to what the terminal still holds. |
 | herdr | A terminal multiplexer built on libghostty, with a small image quota. mddog detects it and sends less image data. |

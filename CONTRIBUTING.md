@@ -59,6 +59,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 | `MDDOG_DEBUG` | `mdd` | Print timing marks to stderr |
 | `MDDOG_CACHE_DIR=DIR` | `mdd` | Use `DIR` as the cache root in place of `~/Library/Caches/mddog` |
 | `TERM_PROGRAM=herdr` | `mdd` | Use herdr's storage limit, and send selection and search changes as bands (an XTVERSION reply that starts with `libghostty` does the same) |
+| `TERM_PROGRAM=rex` | `mdd` | Use Rex's storage limit, send selection and search changes as bands, and take an 80x24 pane at 640x384 px as not shown yet (an XTVERSION reply that starts with `rex ` does the same) |
 | `EDITOR` | `mdd` | The editor for `e` |
 | `XDG_CONFIG_HOME` | `mdd` | Where to look for `mddog/config.toml` |
 | `MDDOG_BIN` | the plugin, `reference/e2e/` | The binary to run |
