@@ -7,9 +7,11 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// The terminal's answer to the viewer's probe, for a cell `(width, height)` device pixels big.
+/// The terminal's answer to the viewer's probe, for a cell `(width, height)` device pixels big. It answers all three
+/// graphics queries: with one missing, the probe waits out its grace for it, and a resize sent in that wait comes
+/// before the viewer reads its first size.
 fn probe_reply((w, h): (u16, u16)) -> Vec<u8> {
-    format!("\x1b]11;rgb:0a0a/0a0a/0f0f\x1b\\\x1b[6;{h};{w}t\x1bP>|libghostty\x1b\\\x1b[?2026;2$y\x1b_Gi=4001;OK\x1b\\\x1b[?62;22c").into_bytes()
+    format!("\x1b]11;rgb:0a0a/0a0a/0f0f\x1b\\\x1b[6;{h};{w}t\x1bP>|libghostty\x1b\\\x1b[?2026;2$y\x1b_Gi=4001;OK\x1b\\\x1b_Gi=4002;EINVAL\x1b\\\x1b_Gi=4003;EINVAL\x1b\\\x1b[?62;22c").into_bytes()
 }
 
 /// How long a test waits on the viewer before it fails. Waits end as soon as their condition holds, so a passing run
