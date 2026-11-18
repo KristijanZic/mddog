@@ -1,0 +1,2 @@
+> [!Warning]
+> note text

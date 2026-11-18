@@ -144,10 +144,66 @@ struct Frame {
     task: Option<bool>,
     loose: bool,
     items: Vec<ListItem>,
+    /// An alert's marker, kept in case the alert turns back into a quote.
+    marker: Option<Marker>,
 }
 
 fn frame(kind: FrameKind) -> Frame {
-    Frame { kind, blocks: vec![], summary: vec![], task: None, loose: false, items: vec![] }
+    Frame { kind, blocks: vec![], summary: vec![], task: None, loose: false, items: vec![], marker: None }
+}
+
+/// An alert's `[!KIND]` marker as the source has it.
+struct Marker {
+    text: String,
+    /// The marker line ends in two or more spaces, so a hard break follows it.
+    hard: bool,
+    /// The first paragraph starts on the next line, so the marker goes in front of its text.
+    joins: bool,
+    /// Something follows the marker. It counts even when it draws nothing, like `<span></span>`, except HTML
+    /// that is only comments, which GitHub removes before it looks.
+    body: bool,
+}
+
+impl Marker {
+    /// Reads the marker from an alert's source range. Returns the marker and the offset just past it.
+    fn read(src: &str) -> Option<(Marker, usize)> {
+        let start = src.find("[!")?;
+        let end = start + src[start..].find(']')? + 1;
+        let tail = src[end..].split(['\n', '\r']).next().unwrap_or("");
+        Some((Marker { text: src[start..end].to_string(), hard: tail.ends_with("  "), joins: false, body: false }, end))
+    }
+}
+
+/// Line breaks in `s`, where `\r\n`, `\n` and a lone `\r` each count as one.
+fn line_breaks(s: &str) -> usize {
+    s.matches('\n').count() + s.matches('\r').count() - s.matches("\r\n").count()
+}
+
+/// The HTML is only comments and white space.
+fn only_comments(h: &str) -> bool {
+    let mut rest = h;
+    while let Some(i) = rest.find("<!--") {
+        if !rest[..i].trim().is_empty() {
+            return false;
+        }
+        let Some(e) = rest[i..].find("-->") else { return true };
+        rest = &rest[i + e + 3..];
+    }
+    rest.trim().is_empty()
+}
+
+/// GitHub draws an alert only at the top level and with a body. Anywhere else it is a quote that starts with
+/// the literal marker.
+fn demote(kind: Alert, marker: Option<Marker>, mut blocks: Vec<Block>) -> Block {
+    let m = marker.unwrap_or_else(|| Marker { text: format!("[!{}]", kind.title().to_uppercase()), hard: false, joins: false, body: false });
+    let text = Inline::Text(m.text, Marks::default());
+    match blocks.first_mut() {
+        Some(Block::Para(v)) if m.joins => {
+            v.splice(0..0, [text, if m.hard { Inline::Hard } else { Inline::Soft }]);
+        }
+        _ => blocks.insert(0, Block::Para(vec![text])),
+    }
+    Block::Quote(blocks)
 }
 
 struct TableBuilder {
@@ -307,16 +363,18 @@ impl Builder {
             FrameKind::Details { open, id } => Block::Details { summary: f.summary, open, body: blocks, id },
             FrameKind::Quote(k) => match k {
                 None => Block::Quote(blocks),
-                Some(k) => Block::Alert(
-                    match k {
+                Some(k) => {
+                    let k = match k {
                         BlockQuoteKind::Note => Alert::Note,
                         BlockQuoteKind::Tip => Alert::Tip,
                         BlockQuoteKind::Important => Alert::Important,
                         BlockQuoteKind::Warning => Alert::Warning,
                         BlockQuoteKind::Caution => Alert::Caution,
-                    },
-                    blocks,
-                ),
+                    };
+                    // The popped frame's parent is now on top.
+                    let body = f.marker.as_ref().map_or(!blocks.is_empty(), |m| m.body);
+                    if matches!(self.top().kind, FrameKind::Root) && body { Block::Alert(k, blocks) } else { demote(k, f.marker, blocks) }
+                }
             },
             FrameKind::Heading(l, id) => {
                 let v = std::mem::take(&mut self.inl);
@@ -912,10 +970,34 @@ pub fn parse(src: &str) -> Doc {
     let line = |off: usize| starts.partition_point(|&s| s <= off) as u32;
     let mut lines: Vec<Option<(u32, u32)>> = vec![];
     let mut cur: Option<(u32, u32)> = None;
+    // The frame index of an alert whose first child has not started yet, and the offset past its marker.
+    let mut alert: Option<(usize, usize)> = None;
     for (ev, range) in Parser::new_ext(src, o).into_offset_iter() {
         let top = b.stack.len() == 1 && b.code.is_none() && b.table.is_none() && matches!(ev, Event::Start(_) | Event::Rule);
         let next = top.then(|| (line(range.start), line(range.end.saturating_sub(1).max(range.start))));
+        if let Some((i, end)) = alert.take()
+            && matches!(ev, Event::Start(Tag::Paragraph))
+            && line_breaks(&src[end..range.start]) == 1
+            && let Some(m) = &mut b.stack[i].marker
+        {
+            m.joins = true;
+        }
+        let body = match &ev {
+            Event::Start(Tag::HtmlBlock) => false,
+            Event::Start(_) | Event::Rule => true,
+            Event::Html(h) => !only_comments(h),
+            _ => false,
+        };
+        if body {
+            b.stack.iter_mut().filter_map(|f| f.marker.as_mut()).for_each(|m| m.body = true);
+        }
+        let opens_alert = matches!(ev, Event::Start(Tag::BlockQuote(Some(_))));
         b.event(ev, &mut meta);
+        if opens_alert && let Some((m, end)) = Marker::read(&src[range.start..range.end]) {
+            let i = b.stack.len() - 1;
+            b.stack[i].marker = Some(m);
+            alert = Some((i, range.start + end));
+        }
         while b.stack[0].blocks.len() > lines.len() {
             lines.push(cur);
         }
