@@ -84,7 +84,9 @@ impl Chrome<'_> {
         let rows = view_rows(self.rows);
         let title = if content > 19 { " TABLE OF CONTENTS" } else { " CONTENTS" };
         let mut lines: Vec<(String, bool)> = vec![(String::new(), false), (title.into(), false), ("─".repeat(content), false)];
-        for (i, e) in self.app.entries.iter().enumerate().skip(self.app.toc_offset as usize) {
+        // Only the entries that fit: a long list costs as much to draw as a short one.
+        let fit = rows.saturating_sub(lines.len());
+        for (i, e) in self.app.entries.iter().enumerate().skip(self.app.toc_offset as usize).take(fit) {
             let title = term::printable(&e.title);
             let label = format!("{}{title}", " ".repeat(1 + 2 * usize::from(e.depth)));
             let max = content.saturating_sub(1);
