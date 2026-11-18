@@ -12,6 +12,7 @@ This is a config with every key at its default value:
 ```toml title="~/.config/mddog/config.toml"
 theme = "light:github-light,dark:github-dark"
 copy_on_select = false
+callouts = "github"
 ```
 
 In your own config, you only need to set the keys you want to change.
@@ -50,6 +51,19 @@ In the preview mode, you can select text by dragging it with the mouse or double
 By default, `copy_on_select` is set to `false`: selecting text only highlights it, and `Cmd-c` copies it.
 
 When set to `true`, mddog automatically copies to clipboard the text you select. `Cmd-c` might not always work in certain terminals (such as iTerm2), so this option is a good workaround.
+
+## `callouts`
+
+This value sets how mddog reads a quote that starts with `[!kind]`.
+
+The default, `"github"`, shows what github.com shows: GitHub's five [alerts](https://github.blog/changelog/2023-12-14-new-markdown-extension-alerts-provide-distinctive-styling-for-significant-content/), and a plain quote for anything else.
+
+Set it to `"obsidian"` to read callouts as [Obsidian](https://help.obsidian.md/callouts) does, with titles, aliases, fold markers and nesting:
+
+```md
+> [!faq]- A folded callout with a title
+> Click the title to open it.
+```
 
 ## Font smoothing
 

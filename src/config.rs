@@ -11,6 +11,8 @@ pub struct Config {
     pub theme: ThemeSpec,
     /// Releasing a drag or double-click selection copies it.
     pub copy_on_select: bool,
+    /// How `> [!kind]` blocks read.
+    pub callouts: Callouts,
     /// The `theme` key's themes, read.
     #[serde(skip)]
     pub themes: Themes,
@@ -20,8 +22,19 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, copy_on_select: false, themes }
+        Config { theme, copy_on_select: false, callouts: Callouts::Github, themes }
     }
+}
+
+/// The `callouts` key: which app's rules a `> [!kind]` block follows.
+#[derive(Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Callouts {
+    /// github.com's alerts: five kinds, the marker alone on the first line, only at the top level of the page.
+    #[default]
+    Github,
+    /// Obsidian's callouts: any kind, aliases, a title, a fold marker, and nesting.
+    Obsidian,
 }
 
 /// The `theme` key: one theme, or one for each macOS appearance.
@@ -205,10 +218,11 @@ mod tests {
 
     #[test]
     fn full() {
-        let c = parse("theme = \"github-dark\"\ncopy_on_select = true\n").unwrap();
+        let c = parse("theme = \"github-dark\"\ncopy_on_select = true\ncallouts = \"obsidian\"\n").unwrap();
         assert_eq!(c.theme, ThemeSpec::One(Source::Builtin(theme::builtin("github-dark").unwrap())));
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
         assert!(c.copy_on_select);
+        assert_eq!(c.callouts, Callouts::Obsidian);
     }
 
     #[test]
@@ -256,6 +270,8 @@ mod tests {
         assert!(e.starts_with("line 1: colours: "), "{e}");
         let e = one_line("theme = \"dark\n");
         assert!(e.starts_with("line 1: theme: "), "{e}");
+        let e = one_line("callouts = \"gitlab\"\n");
+        assert!(e.starts_with("line 1: callouts: "), "{e}");
         let e = one_line("theme = \"dark\"\n");
         assert!(e.starts_with("line 1: theme: unknown theme \"dark\". Built-in themes: github-light, github-dark"), "{e}");
         let e = one_line("theme = \"light:github-light\"\n");

@@ -12,3 +12,8 @@ theme = "light:github-light,dark:github-dark"
 
 # Copy the text you select with a mouse drag or a double-click, as soon as you let go.
 copy_on_select = false
+
+# How to read a `> [!kind]` block. "github" shows only what github.com shows: GitHub's five kinds,
+# with no title. "obsidian" reads it as Obsidian does: any kind and its aliases, a title on the first line,
+# a fold marker (+ or -), and nested callouts.
+callouts = "github"

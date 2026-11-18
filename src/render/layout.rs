@@ -313,7 +313,7 @@ impl<'a> Layouter<'a> {
                     self.page.items[bar].h = *y - y0;
                 }
             }
-            Block::Alert(k, bs) => self.alert(*k, bs, x, w, y),
+            Block::Alert { .. } => self.alert(b, x, w, y),
             Block::List { start, items, tight } => self.list(*start, items, *tight, x, w, y),
             Block::Table { aligns, head, rows } => self.table(aligns, head, rows, x, w, y),
             Block::Math(tex) => {
@@ -398,18 +398,15 @@ impl<'a> Layouter<'a> {
         self.ink = old;
     }
 
-    fn alert(&mut self, k: Alert, bs: &[Block], x: f32, w: f32, y: &mut f32) {
+    /// A GitHub alert, or an Obsidian callout with its own title and maybe a fold.
+    fn alert(&mut self, b: &Block, x: f32, w: f32, y: &mut f32) {
+        let Block::Alert { kind: k, title, fold, body: bs } = b else { return };
+        let (k, fold, title) = (*k, *fold, title.as_deref());
         let s = self.s;
-        let (title, glyph) = (
-            k.title(),
-            match k {
-                Alert::Note => "i",
-                Alert::Tip => "✦",
-                Alert::Important | Alert::Warning => "!",
-                Alert::Caution => "×",
-            },
-        );
-        let col = self.th.alerts[k as usize];
+        let col = self.th.alerts.get(k as usize).copied().unwrap_or_else(|| obsidian_color(k, self.th.dark));
+        let named = [Inline::Text(k.title().into(), Marks::default())];
+        let title = title.unwrap_or(&named);
+        let open = fold.is_none_or(|(open, id)| open != self.o.toggled.contains(&id));
         // GitHub's alert: a bar, 8 px padding above and below, a title line 16 px high, then 16 px to the body.
         // Obsidian's callout has no bar but a box tinted with its color.
         let [top, bottom, side] = self.th.alert_padding.map(|v| v * s);
@@ -420,31 +417,64 @@ impl<'a> Layouter<'a> {
         let bar = (bw > 0.0).then(|| self.rect(x, y0, bw, 0.0, col, 0.0));
         *y += top;
         let ind = bw + side;
+        let right = 0.0;
         let r = 8.0 * s;
-        if self.th.look == Look::Obsidian {
-            // Obsidian's title: the octicon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
-            let tc = TextStyle { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
-            let cy = *y + 0.65 * tc.size;
-            if let Some(bmp) = icons::bitmap(Icon::Alert(k), col, (2.0 * r).round() as u32) {
-                self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
+        let icon = |me: &mut Self, cy: f32| {
+            let icon = if (k as usize) < Alert::GITHUB.len() { Icon::Octicon(k) } else { Icon::Alert(k) };
+            if let Some(bmp) = icons::bitmap(icon, col, (2.0 * r).round() as u32) {
+                me.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
             }
-            let tx = x + ind + 2.0 * r + 4.0 * s;
-            self.inlines(&[Inline::Text(title.into(), Marks::default())], tx, w - ind - 2.0 * r - 4.0 * s, y, &tc);
+        };
+        let (tc, tx) = if self.th.look == Look::Obsidian {
+            // Obsidian's title: the icon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
+            let tc = TextStyle { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
+            icon(self, *y + 0.65 * tc.size);
+            (tc, x + ind + 2.0 * r + 4.0 * s)
         } else {
             let cy = *y + 8.0 * s;
-            self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Rect { fill: 0, stroke: Some((1.5 * s, 0xff000000 | col)), radius: r });
-            let gf = FontKey::new(11.0 * s, BOLD);
-            let gw = self.fonts.measure(gf, glyph);
-            let (ga, gd) = self.fonts.ascent_descent(gf);
-            self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: NO_TEXT });
-            let tc = TextStyle { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 };
-            let tx = x + ind + 2.0 * r + 8.0 * s;
-            self.inlines(&[Inline::Text(title.into(), Marks::default())], tx, w - ind - 2.0 * r - 8.0 * s, y, &tc);
+            let glyph = match k {
+                Alert::Note => Some("i"),
+                Alert::Tip => Some("✦"),
+                Alert::Important | Alert::Warning => Some("!"),
+                Alert::Caution => Some("×"),
+                _ => None,
+            };
+            if let Some(glyph) = glyph {
+                self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Rect { fill: 0, stroke: Some((1.5 * s, 0xff000000 | col)), radius: r });
+                let gf = FontKey::new(11.0 * s, BOLD);
+                let gw = self.fonts.measure(gf, glyph);
+                let (ga, gd) = self.fonts.ascent_descent(gf);
+                self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: NO_TEXT });
+            } else {
+                // A kind GitHub doesn't have: Obsidian's icon, in GitHub's place.
+                icon(self, cy);
+            }
+            (TextStyle { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 }, x + ind + 2.0 * r + 8.0 * s)
+        };
+        let (ty0, tw) = (*y, w - right - (tx - x));
+        // A folding callout keeps room for its arrow after the title.
+        let fw = if fold.is_some() { 2.0 * r + 4.0 * s } else { 0.0 };
+        let first = self.page.items.len();
+        self.inlines(title, tx, tw - fw, y, &tc);
+        if let Some((_, id)) = fold {
+            // Obsidian's chevron sits 4 px after the title's box, on its first line: after the drawn title, code
+            // and math included, or at the line's end once the title wraps. It points down open, right folded.
+            let wrapped = *y - ty0 > 1.5 * tc.lh * tc.size;
+            let end = if wrapped { tx + tw - fw } else { self.page.items[first..].iter().map(|it| it.x + it.w).fold(tx, f32::max) };
+            let cy = ty0 + tc.lh * tc.size / 2.0;
+            if let Some(bmp) = icons::bitmap(Icon::Fold(open), col, (2.0 * r).round() as u32) {
+                self.push(end + 4.0 * s, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
+            }
+            self.page.toggles.push((x, y0, w, *y - y0, id));
         }
-        *y += 16.0 * s;
-        self.nl();
-        self.blocks(bs, x + ind, w - ind, y, false);
-        *y += bottom;
+        let shown = open && !bs.is_empty();
+        if shown {
+            *y += 16.0 * s;
+            self.nl();
+            self.blocks(bs, x + ind, w - ind - right, y, false);
+        }
+        // The bottom padding counts the last paragraph's margin, so a callout with only a title pads as at the top.
+        *y += if shown { bottom } else { top };
         for i in [boxed, bar].into_iter().flatten() {
             self.page.items[i].h = *y - y0;
         }
@@ -1399,6 +1429,21 @@ fn alpha(n: u64) -> String {
     }
     out.reverse();
     String::from_utf8(out).unwrap_or_default()
+}
+
+/// The color Obsidian's default theme gives a callout kind GitHub doesn't have, from its `app.css`.
+fn obsidian_color(k: Alert, dark: bool) -> Rgb {
+    let [light, dk] = match k {
+        Alert::Abstract => [0x00bfbc, 0x53dfdd],
+        Alert::Info | Alert::Todo | Alert::Note => [0x086ddd, 0x027aff],
+        Alert::Success => [0x08b94e, 0x44cf6e],
+        Alert::Question | Alert::Warning | Alert::Caution => [0xec7500, 0xe9973f],
+        Alert::Failure | Alert::Danger | Alert::Bug => [0xe93147, 0xfb464c],
+        Alert::Example => [0x7852ee, 0xa882ff],
+        Alert::Quote => [0x9e9e9e, 0x9e9e9e],
+        Alert::Tip | Alert::Important => [0x00bfbc, 0x53dfdd],
+    };
+    if dark { dk } else { light }
 }
 
 #[cfg(test)]

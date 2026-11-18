@@ -170,7 +170,7 @@ impl Theme {
             hl_cur_fg: c("match-current-fg"),
             sel_bg: c("text-selection"),
             copied: c("alert-tip"),
-            alerts: Alert::ALL.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),
+            alerts: Alert::GITHUB.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),
             diff_add_bg: c("diff-add-bg"),
             diff_del_bg: c("diff-del-bg"),
             pl: SyntaxColors {

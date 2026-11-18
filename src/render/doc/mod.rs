@@ -2,6 +2,8 @@
 use pulldown_cmark::{BlockQuoteKind, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use std::collections::HashMap;
 
+use crate::config::Callouts;
+
 mod dollars;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -30,7 +32,8 @@ pub enum Inline {
     Ruby { base: Vec<Inline>, rt: Vec<Inline> },
 }
 
-/// A GitHub alert's kind. Its place in this list indexes the theme's alert colors and the alert icons.
+/// An alert's or callout's kind. GitHub's five come first, and their place indexes the theme's alert colors.
+/// The rest are Obsidian's callout kinds, read only with `callouts = "obsidian"`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Alert {
     Note,
@@ -38,10 +41,41 @@ pub enum Alert {
     Important,
     Warning,
     Caution,
+    Abstract,
+    Info,
+    Todo,
+    Success,
+    Question,
+    Failure,
+    Danger,
+    Bug,
+    Example,
+    Quote,
 }
 
 impl Alert {
-    pub const ALL: [Alert; 5] = [Alert::Note, Alert::Tip, Alert::Important, Alert::Warning, Alert::Caution];
+    /// GitHub's kinds, which have theme tokens.
+    pub const GITHUB: [Alert; 5] = [Alert::Note, Alert::Tip, Alert::Important, Alert::Warning, Alert::Caution];
+
+    /// The kind an Obsidian callout word selects, from Obsidian's `app.css`. `important` and `caution` are
+    /// tip and warning there, and a word Obsidian doesn't know draws as a note.
+    pub fn obsidian(word: &str) -> Alert {
+        match word {
+            "abstract" | "summary" | "tldr" => Alert::Abstract,
+            "info" => Alert::Info,
+            "todo" => Alert::Todo,
+            "tip" | "hint" | "important" => Alert::Tip,
+            "success" | "check" | "done" => Alert::Success,
+            "question" | "help" | "faq" => Alert::Question,
+            "warning" | "caution" | "attention" => Alert::Warning,
+            "failure" | "fail" | "missing" => Alert::Failure,
+            "danger" | "error" => Alert::Danger,
+            "bug" => Alert::Bug,
+            "example" => Alert::Example,
+            "quote" | "cite" => Alert::Quote,
+            _ => Alert::Note,
+        }
+    }
 
     /// The title GitHub draws, which is also the theme token's name in lower case.
     pub fn title(self) -> &'static str {
@@ -51,6 +85,16 @@ impl Alert {
             Alert::Important => "Important",
             Alert::Warning => "Warning",
             Alert::Caution => "Caution",
+            Alert::Abstract => "Abstract",
+            Alert::Info => "Info",
+            Alert::Todo => "Todo",
+            Alert::Success => "Success",
+            Alert::Question => "Question",
+            Alert::Failure => "Failure",
+            Alert::Danger => "Danger",
+            Alert::Bug => "Bug",
+            Alert::Example => "Example",
+            Alert::Quote => "Quote",
         }
     }
 }
@@ -81,7 +125,15 @@ pub enum Block {
         text: String,
     },
     Quote(Vec<Block>),
-    Alert(Alert, Vec<Block>),
+    /// A GitHub alert, or an Obsidian callout.
+    Alert {
+        kind: Alert,
+        /// The callout's title. `None` for a GitHub alert, which draws its kind's name.
+        title: Option<Vec<Inline>>,
+        /// A callout with a fold marker: whether it starts open, and its toggle id, shared with `<details>`.
+        fold: Option<(bool, usize)>,
+        body: Vec<Block>,
+    },
     List {
         start: Option<u64>,
         items: Vec<ListItem>,
@@ -111,7 +163,7 @@ pub fn walk_shown<'a>(blocks: &'a [Block], f: &mut impl FnMut(&'a Block)) {
     for b in blocks {
         f(b);
         match b {
-            Block::Quote(bs) | Block::Alert(_, bs) | Block::Align(_, bs) | Block::Details { body: bs, open: true, .. } => walk_shown(bs, f),
+            Block::Quote(bs) | Block::Alert { body: bs, fold: None | Some((true, _)), .. } | Block::Align(_, bs) | Block::Details { body: bs, open: true, .. } => walk_shown(bs, f),
             Block::List { items, .. } => items.iter().for_each(|i| walk_shown(&i.blocks, f)),
             Block::Footnotes(notes) => notes.iter().for_each(|n| walk_shown(&n.2, f)),
             _ => {}
@@ -146,10 +198,12 @@ struct Frame {
     items: Vec<ListItem>,
     /// An alert's marker, kept in case the alert turns back into a quote.
     marker: Option<Marker>,
+    /// A quote's first source line after `>` and one space, which Obsidian matches its callout marker against.
+    head: Option<String>,
 }
 
 fn frame(kind: FrameKind) -> Frame {
-    Frame { kind, blocks: vec![], summary: vec![], task: None, loose: false, items: vec![], marker: None }
+    Frame { kind, blocks: vec![], summary: vec![], task: None, loose: false, items: vec![], marker: None, head: None }
 }
 
 /// An alert's `[!KIND]` marker as the source has it.
@@ -242,6 +296,7 @@ struct Builder {
     in_summary: bool,
     anchors: HashMap<String, usize>,
     details_n: usize,
+    callouts: Callouts,
     in_image: Option<(String, String, Vec<Inline>)>,
     html_buf: String,
     /// Set while a raw HTML block is read, so its loose text becomes `Block::Text`.
@@ -361,9 +416,10 @@ impl Builder {
                 Block::Align(a, blocks)
             }
             FrameKind::Details { open, id } => Block::Details { summary: f.summary, open, body: blocks, id },
-            FrameKind::Quote(k) => match k {
-                None => Block::Quote(blocks),
-                Some(k) => {
+            FrameKind::Quote(k) => match (k, self.callouts) {
+                (_, Callouts::Obsidian) => self.callout(f.head.as_deref(), blocks).unwrap_or_else(Block::Quote),
+                (None, Callouts::Github) => Block::Quote(blocks),
+                (Some(k), Callouts::Github) => {
                     let k = match k {
                         BlockQuoteKind::Note => Alert::Note,
                         BlockQuoteKind::Tip => Alert::Tip,
@@ -373,7 +429,7 @@ impl Builder {
                     };
                     // The popped frame's parent is now on top.
                     let body = f.marker.as_ref().map_or(!blocks.is_empty(), |m| m.body);
-                    if matches!(self.top().kind, FrameKind::Root) && body { Block::Alert(k, blocks) } else { demote(k, f.marker, blocks) }
+                    if matches!(self.top().kind, FrameKind::Root) && body { Block::Alert { kind: k, title: None, fold: None, body: blocks } } else { demote(k, f.marker, blocks) }
                 }
             },
             FrameKind::Heading(l, id) => {
@@ -933,7 +989,12 @@ pub fn slug(s: &str) -> String {
     o
 }
 
+/// Parses `src` with the config's `callouts` rule.
 pub fn parse(src: &str) -> Doc {
+    parse_with(src, crate::config::get().callouts)
+}
+
+pub fn parse_with(src: &str, callouts: Callouts) -> Doc {
     // mddog's math pre-pass: escapes Markdown inside math spans and holds `\$`, so the parser keeps math text.
     let protected = dollars::protect_math(src);
     let src = protected.as_str();
@@ -943,7 +1004,10 @@ pub fn parse(src: &str) -> Doc {
     o.insert(Options::ENABLE_STRIKETHROUGH);
     o.insert(Options::ENABLE_TASKLISTS);
     o.insert(Options::ENABLE_YAML_STYLE_METADATA_BLOCKS);
-    o.insert(Options::ENABLE_GFM);
+    // GitHub's alerts. Obsidian's callouts are read from the quote's text instead, in `Builder::callout`.
+    if callouts == Callouts::Github {
+        o.insert(Options::ENABLE_GFM);
+    }
     // Not ENABLE_MATH: `protect_math` finds math by GitHub's rules, and `split_math` reads it from the text.
     let mut b = Builder {
         stack: vec![frame(FrameKind::Root)],
@@ -960,6 +1024,7 @@ pub fn parse(src: &str) -> Doc {
         in_summary: false,
         anchors: HashMap::new(),
         details_n: 0,
+        callouts,
         in_image: None,
         html_buf: String::new(),
         raw: false,
@@ -992,7 +1057,12 @@ pub fn parse(src: &str) -> Doc {
             b.stack.iter_mut().filter_map(|f| f.marker.as_mut()).for_each(|m| m.body = true);
         }
         let opens_alert = matches!(ev, Event::Start(Tag::BlockQuote(Some(_))));
+        let opens_quote = callouts == Callouts::Obsidian && matches!(ev, Event::Start(Tag::BlockQuote(_)));
         b.event(ev, &mut meta);
+        if opens_quote {
+            let i = b.stack.len() - 1;
+            b.stack[i].head = Some(quote_head(&src[range.start..]).to_string());
+        }
         if opens_alert && let Some((m, end)) = Marker::read(&src[range.start..range.end]) {
             let i = b.stack.len() - 1;
             b.stack[i].marker = Some(m);
@@ -1032,6 +1102,115 @@ pub fn parse(src: &str) -> Doc {
     Doc { blocks: root.blocks, links: b.links, lines }
 }
 
+impl Builder {
+    /// Reads a quote as an Obsidian callout, or hands its blocks back. Obsidian's rule, from its `app.js`: the
+    /// quote's first source line, `head`, starts `[!kind]`, an optional `+` or `-` follows, then a space or the
+    /// line's end. It matches the raw line, so an escaped or entity-encoded marker stays text and Markdown in
+    /// the kind is part of it. The rest of that line is the title.
+    fn callout(&mut self, head: Option<&str>, mut blocks: Vec<Block>) -> Result<Block, Vec<Block>> {
+        let Some((word, fold, _)) = head.and_then(|h| callout_marker(h, true)) else { return Err(blocks) };
+        let Some((i, end)) = blocks.first().and_then(|b| if let Block::Para(v) = b { parsed_marker_end(v, fold.is_some()) } else { None }) else { return Err(blocks) };
+        let Block::Para(mut inl) = blocks.remove(0) else { unreachable!() };
+        let Inline::Text(t, m) = &inl[i] else { unreachable!() };
+        let rest = Inline::Text(t[end..].to_string(), *m);
+        inl.splice(..=i, [rest]);
+        let cut = inl.iter().position(|i| matches!(i, Inline::Soft | Inline::Hard)).unwrap_or(inl.len());
+        let after: Vec<Inline> = inl.drain(cut..).skip(1).collect();
+        let mut title = trim_inlines(inl);
+        if title.is_empty() {
+            // Obsidian's default title: the kind, dashes as spaces, first letter capitalized.
+            let t = word.replace('-', " ");
+            let mut c = t.chars();
+            let t = c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default();
+            title = vec![Inline::Text(t, Marks::default())];
+        }
+        if !after.is_empty() {
+            blocks.insert(0, Block::Para(after));
+        }
+        let fold = fold.map(|open| {
+            self.details_n += 1;
+            (open, self.details_n)
+        });
+        Ok(Block::Alert { kind: Alert::obsidian(&word), title: Some(title), fold, body: blocks })
+    }
+}
+
+/// A quote's first line from its `>`, as Obsidian reads it: the `>`, then at most one space, are dropped.
+fn quote_head(from: &str) -> &str {
+    let line = from.split(['\n', '\r']).next().unwrap_or_default();
+    let line = line.trim_start_matches([' ', '\t']);
+    let line = line.strip_prefix('>').unwrap_or(line);
+    line.strip_prefix(' ').unwrap_or(line)
+}
+
+/// Where the marker ends in a callout's parsed first paragraph: the text run holding the first `]` after `[!`,
+/// and the byte past it and any fold sign. Markdown in the kind splits the marker over several runs.
+fn parsed_marker_end(v: &[Inline], fold: bool) -> Option<(usize, usize)> {
+    // A reference definition of `[!kind]` makes the marker a link whose text is `!kind`.
+    if let Some(Inline::Text(t, m)) = v.first()
+        && m.link != 0
+        && t.starts_with('!')
+    {
+        let last = v.iter().take_while(|x| matches!(x, Inline::Text(_, n) if n.link == m.link)).count() - 1;
+        let Inline::Text(t, _) = &v[last] else { unreachable!() };
+        return match v.get(last + 1) {
+            Some(Inline::Text(n, _)) if fold && n.starts_with(['+', '-']) => Some((last + 1, 1)),
+            _ => Some((last, t.len())),
+        };
+    }
+    if !matches!(v.first(), Some(Inline::Text(t, _)) if t.starts_with("[!")) {
+        return None;
+    }
+    for (i, x) in v.iter().enumerate() {
+        let Inline::Text(t, _) = x else { return None };
+        let from = if i == 0 { 2 } else { 0 };
+        if let Some(j) = t[from..].find(']') {
+            let mut end = from + j + 1;
+            if fold && t[end..].starts_with(['+', '-']) {
+                end += 1;
+            }
+            return Some((i, end));
+        }
+    }
+    None
+}
+
+/// Splits a callout's first line into its kind word, fold state and the text after the marker.
+/// `next_breaks`: the text ends the line, so the marker may end it.
+fn callout_marker(t: &str, next_breaks: bool) -> Option<(String, Option<bool>, &str)> {
+    let inner = t.strip_prefix("[!")?;
+    let close = inner.find(']')?;
+    let (raw, mut rest) = (&inner[..close], &inner[close + 1..]);
+    if raw.is_empty() {
+        return None;
+    }
+    let mut fold = None;
+    if let Some(r) = rest.strip_prefix('+') {
+        (fold, rest) = (Some(true), r);
+    } else if let Some(r) = rest.strip_prefix('-') {
+        (fold, rest) = (Some(false), r);
+    }
+    if !(rest.starts_with(char::is_whitespace) || rest.is_empty() && next_breaks) {
+        return None;
+    }
+    // The kind is the text before `|`, trimmed and lowercased, with runs of whitespace as one dash.
+    let kind = raw.split('|').next().unwrap_or_default();
+    let word = kind.split_whitespace().collect::<Vec<_>>().join("-").to_lowercase();
+    Some((word, fold, rest))
+}
+
+/// Drops the whitespace at both ends of a run of inlines, and the runs left empty.
+fn trim_inlines(mut v: Vec<Inline>) -> Vec<Inline> {
+    if let Some(Inline::Text(t, _)) = v.first_mut() {
+        *t = t.trim_start().to_string();
+    }
+    if let Some(Inline::Text(t, _)) = v.last_mut() {
+        *t = t.trim_end().to_string();
+    }
+    v.retain(|i| !matches!(i, Inline::Text(t, _) if t.is_empty()));
+    v
+}
+
 /// A paragraph of plain text that is `$$…$$` as a whole is display math, as GitHub has it.
 fn display_paras(bs: &mut [Block]) {
     for b in bs.iter_mut() {
@@ -1060,7 +1239,7 @@ fn display_paras(bs: &mut [Block]) {
                     *b = Block::Math(inner.to_string());
                 }
             }
-            Block::Quote(c) | Block::Alert(_, c) | Block::Align(_, c) | Block::Details { body: c, .. } => display_paras(c),
+            Block::Quote(c) | Block::Alert { body: c, .. } | Block::Align(_, c) | Block::Details { body: c, .. } => display_paras(c),
             Block::List { items, .. } => items.iter_mut().for_each(|i| display_paras(&mut i.blocks)),
             Block::Footnotes(f) => f.iter_mut().for_each(|f| display_paras(&mut f.2)),
             _ => {}

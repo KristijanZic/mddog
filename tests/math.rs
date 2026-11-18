@@ -49,7 +49,7 @@ fn blocks(bs: &[Block], out: &mut String) {
                 out.push_str(&s.split_whitespace().collect::<Vec<_>>().join(" "));
                 out.push('\n');
             }
-            Block::Quote(c) | Block::Alert(_, c) | Block::Align(_, c) => blocks(c, out),
+            Block::Quote(c) | Block::Alert { body: c, .. } | Block::Align(_, c) => blocks(c, out),
             Block::Details { summary, body, .. } => {
                 line(summary, out);
                 blocks(body, out);

@@ -23,7 +23,7 @@ fn marker(blocks: &[Block]) -> String {
 fn ours(blocks: &[Block], out: &mut Vec<String>) {
     for b in blocks {
         match b {
-            Block::Alert(k, bs) => {
+            Block::Alert { kind: k, body: bs, .. } => {
                 out.push(format!("alert {}", k.title().to_lowercase()));
                 ours(bs, out);
             }
