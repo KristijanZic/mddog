@@ -18,7 +18,7 @@ trace, dump = os.path.join(d, "trace.log"), os.path.join(d, "view.png")
 run(f"clear; MDDOG_TRACE={trace} MDDOG_DUMP_VIEW={dump} {BIN} {src}")
 wait(lambda: views(trace))
 time.sleep(1.0)
-CURRENT = np.array([0xF2, 0xCC, 0x60])
+CURRENT = np.array([0xFF, 0x96, 0x32])
 
 
 def matches():

@@ -257,3 +257,33 @@ fn a_display_p3_page_matches_the_cells_around_it() {
     e.set_display_p3(true);
     assert_eq!(corner(&e), [14, 17, 22, 255]);
 }
+
+/// The darkest and brightest luminance inside a CSS-pixel rect of a 2x snapshot.
+fn lum_range(e: &Engine, r: [f64; 4]) -> (f64, f64) {
+    let snap = e.snapshot(0.0, 200.0, 2.0, |n| Some(vec![0u8; n])).unwrap_or_else(|| unreachable!());
+    let (mut lo, mut hi) = (f64::MAX, 0.0f64);
+    for y in (r[1] * 2.0) as usize..((r[1] + r[3]) * 2.0) as usize {
+        for x in (r[0] * 2.0) as usize..((r[0] + r[2]) * 2.0) as usize {
+            let p = &snap.rgba[(y * snap.width + x) * 4..][..3];
+            let l = 0.2126 * f64::from(p[0]) + 0.7152 * f64::from(p[1]) + 0.0722 * f64::from(p[2]);
+            (lo, hi) = (lo.min(l), hi.max(l));
+        }
+    }
+    (lo, hi)
+}
+
+#[test]
+fn search_marks_are_dark_text_on_a_bright_box() {
+    // Chrome's find-in-page look in every theme: a bright box with dark text, so the match stands
+    // out and reads the same on a light or dark page.
+    for theme in ["github-light", "github-dark", "obsidian-light", "obsidian-dark"] {
+        let e = Engine::new(640.0, 2.0, false);
+        e.load("ammo [ammo](https://x.y) `ammo`\n", std::path::Path::new("."), false, mddog::theme::builtin(theme).unwrap_or_else(|| unreachable!()));
+        let found = e.search("ammo", None);
+        e.search_current(1);
+        for (i, r) in found.iter().enumerate() {
+            let (lo, hi) = lum_range(&e, r[0]);
+            assert!(lo < 15.0 && hi > 150.0, "{theme} match {i}: darkest {lo:.0}, brightest {hi:.0}");
+        }
+    }
+}

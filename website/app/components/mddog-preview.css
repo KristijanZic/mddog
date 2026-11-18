@@ -30,8 +30,8 @@
   --border: #3d444d;
   --text-selection: #1f4a82;
   --mark-bg: #5a4a00;
-  --match-bg: #5a4a00;
-  --match-current-bg: #9e6a03;
+  --match-bg: #ffff00;
+  --match-current-bg: #ff9632;
   --alert-note: #4493f8;
   --alert-tip: #3fb950;
   --alert-warning: #d29922;
@@ -217,7 +217,7 @@
 
 .mdd-page mark {
   background: var(--match-bg);
-  color: inherit;
+  color: #000;
 }
 
 .mdd-page mark.mdd-current {
@@ -693,8 +693,8 @@ html:not(.dark) .mdd:not([data-theme]) {
   --pl-en: #6639ba;
   --pl-s: #0a3069;
   --select-bg: #e6eaef;
-  --match-bg: #fff8c5;
-  --match-current-bg: #ffb86c;
+  --match-bg: #ffff00;
+  --match-current-bg: #ff9632;
   --alert-tip: #1a7f37;
   --alert-warning: #9a6700;
   --pl-del-bg: #ffebe9;

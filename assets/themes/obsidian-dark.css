@@ -24,8 +24,10 @@
   --mddog-alt-bg: #232323;
   --mddog-rule: #333333;
   --mddog-mark-bg: #5a4a00;
-  --mddog-match-bg: #5a4a00;
-  --mddog-match-current-bg: #9e6a03;
+  --mddog-match-bg: #ffff00;
+  --mddog-match-current-bg: #ff9632;
+  --mddog-match-fg: #000000;
+  --mddog-match-current-fg: #000000;
   --mddog-text-selection: #483699;
   --mddog-alert-note: #027aff;
   --mddog-alert-tip: #53dfdd;

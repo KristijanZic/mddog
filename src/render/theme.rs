@@ -50,6 +50,9 @@ pub struct Theme {
     pub mark_bg: Rgb,
     pub hl_bg: Rgb,
     pub hl_cur_bg: Rgb,
+    /// Text inside a match and inside the current match.
+    pub hl_fg: Rgb,
+    pub hl_cur_fg: Rgb,
     pub sel_bg: Rgb,
     /// By `Alert as usize`.
     pub alerts: [Rgb; 5],
@@ -163,6 +166,8 @@ impl Theme {
             mark_bg: c("mark-bg"),
             hl_bg: c("match-bg"),
             hl_cur_bg: c("match-current-bg"),
+            hl_fg: c("match-fg"),
+            hl_cur_fg: c("match-current-fg"),
             sel_bg: c("text-selection"),
             copied: c("alert-tip"),
             alerts: Alert::ALL.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),

@@ -2,7 +2,7 @@
 use crate::render::icons;
 use crate::render::page::*;
 use crate::render::text::Fonts;
-use crate::render::theme::{Theme, rgb};
+use crate::render::theme::{Rgb, Theme, rgb};
 use core_graphics::base::kCGImageAlphaPremultipliedLast;
 use core_graphics::color_space::{CGColorSpace, kCGColorSpaceDisplayP3};
 use core_graphics::context::CGContext;
@@ -149,19 +149,7 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
                     ctx.stroke_path();
                 }
             }
-            Kind::Text { s: t, f, color, under, strike, asc, .. } => {
-                set_fill(&ctx, *color, 1.0);
-                fonts.draw(&ctx, *f, t, x as f32, it.y + asc);
-                if *under || *strike {
-                    set_fill(&ctx, *color, 1.0);
-                    let (u, st, th) = f.lines();
-                    for (on, dy) in [(*under, u), (*strike, st)] {
-                        if on {
-                            ctx.fill_rect(CGRect::new(&CGPoint::new(x, f64::from(it.y + asc) + f64::from(dy)), &CGSize::new(iw, f64::from(th))));
-                        }
-                    }
-                }
-            }
+            Kind::Text { color, .. } => draw_text(&ctx, fonts, it, x, *color),
             Kind::Img(b) => {
                 let img = cg_image(b);
                 ctx.save();
@@ -193,6 +181,35 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
                     ctx.stroke_path();
                 }
             }
+        }
+        ctx.restore();
+    }
+    // Chrome's find-in-page look: a solid box with the text inside it drawn again in one dark color,
+    // so the match reads the same over links, syntax colors and any theme. Before the scroll bars and
+    // buttons, so a box never hides them.
+    for &(x, y, w, hh, cur) in &cx.ov.marks {
+        if y > top + h as f32 || y + hh < top {
+            continue;
+        }
+        ctx.save();
+        // A mark in a code block that scrolls sideways stays inside the block.
+        let mid = y + hh / 2.0;
+        if let Some(hs) = page.hscroll.iter().find(|hs| hs.y <= mid && mid < hs.y + hs.h) {
+            ctx.clip_to_rect(CGRect::new(&CGPoint::new(hs.x as f64, hs.y as f64), &CGSize::new(hs.w as f64, hs.h as f64)));
+        }
+        ctx.clip_to_rect(CGRect::new(&CGPoint::new(x as f64, y as f64), &CGSize::new(w as f64, hh as f64)));
+        set_fill(&ctx, if cur { cx.th.hl_cur_bg } else { cx.th.hl_bg }, 1.0);
+        ctx.fill_rect(CGRect::new(&CGPoint::new(x as f64, y as f64), &CGSize::new(w as f64, hh as f64)));
+        let fg = if cur { cx.th.hl_cur_fg } else { cx.th.hl_fg };
+        for &i in items {
+            let it = &page.items[i as usize];
+            let dx = if it.clip > 0 { -cx.ov.hoff.get(it.clip as usize - 1).copied().unwrap_or(0.0) } else { 0.0 };
+            // Only the runs under this mark: a one-letter search on a long code line has many marks.
+            let ix = it.x + dx;
+            if !matches!(it.k, Kind::Text { .. }) || it.y > y + hh || it.y + it.h < y || ix > x + w || ix + it.w < x {
+                continue;
+            }
+            draw_text(&ctx, fonts, it, f64::from(ix), fg);
         }
         ctx.restore();
     }
@@ -235,13 +252,6 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
             fonts.draw(&ctx, f, t, bx + px, by + py + a);
         }
     }
-    for &(x, y, w, hh, cur) in &cx.ov.marks {
-        if y > top + h as f32 || y + hh < top {
-            continue;
-        }
-        set_fill(&ctx, if cur { cx.th.hl_cur_bg } else { cx.th.hl_bg }, if cur { 0.75 } else { 0.55 });
-        ctx.fill_rect(CGRect::new(&CGPoint::new(x as f64, y as f64), &CGSize::new(w as f64, hh as f64)));
-    }
     for &(x, y, w, hh) in &cx.ov.sel {
         if y > top + h as f32 || y + hh < top {
             continue;
@@ -265,6 +275,19 @@ pub fn render_into(fonts: &mut Fonts, cx: &Ctx, top: f32, h: usize, w: usize, it
         ctx.restore();
     }
     drop(ctx);
+}
+
+/// Draws a text item's glyphs, underline and strike in `color`, its left edge at `x`.
+fn draw_text(ctx: &CGContext, fonts: &mut Fonts, it: &Item, x: f64, color: Rgb) {
+    let Kind::Text { s: t, f, under, strike, asc, .. } = &it.k else { return };
+    set_fill(ctx, color, 1.0);
+    fonts.draw(ctx, *f, t, x as f32, it.y + asc);
+    let (u, st, th) = f.lines();
+    for (on, dy) in [(*under, u), (*strike, st)] {
+        if on {
+            ctx.fill_rect(CGRect::new(&CGPoint::new(x, f64::from(it.y + asc) + f64::from(dy)), &CGSize::new(f64::from(it.w), f64::from(th))));
+        }
+    }
 }
 
 /// Draws a diagram button: GitHub's bordered box for copy and expand, and a bare icon for the zoom bar,

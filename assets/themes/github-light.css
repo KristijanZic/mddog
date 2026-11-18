@@ -23,8 +23,10 @@
   --mddog-alt-bg: #f6f8fa;
   --mddog-rule: #d1d9e0;
   --mddog-mark-bg: #fff8c5;
-  --mddog-match-bg: #fff8c5;
-  --mddog-match-current-bg: #ffb86c;
+  --mddog-match-bg: #ffff00;
+  --mddog-match-current-bg: #ff9632;
+  --mddog-match-fg: #000000;
+  --mddog-match-current-fg: #000000;
   --mddog-text-selection: #b6d6fb;
   --mddog-alert-note: #0969da;
   --mddog-alert-tip: #1a7f37;

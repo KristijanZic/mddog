@@ -103,7 +103,7 @@ const TOKENS: &[(&str, Kind)] = &[
     // The page.
     ("text", Kind::Color), ("text-muted", Kind::Color), ("heading", Kind::Color), ("link", Kind::Color), ("accent", Kind::Color),
     ("code-bg", Kind::Color), ("pre-bg", Kind::Color), ("alt-bg", Kind::Color), ("rule", Kind::Color), ("mark-bg", Kind::Color),
-    ("match-bg", Kind::Color), ("match-current-bg", Kind::Color), ("text-selection", Kind::Color),
+    ("match-bg", Kind::Color), ("match-current-bg", Kind::Color), ("match-fg", Kind::Color), ("match-current-fg", Kind::Color), ("text-selection", Kind::Color),
     ("alert-note", Kind::Color), ("alert-tip", Kind::Color), ("alert-important", Kind::Color), ("alert-warning", Kind::Color), ("alert-caution", Kind::Color),
     ("diff-add-bg", Kind::Color), ("diff-del-bg", Kind::Color), ("button-bg", Kind::Color),
     // Code.
