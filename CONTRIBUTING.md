@@ -5,6 +5,7 @@ How to check, test, debug, and release mddog. For a map of the code, read `ARCHI
 ## Checks
 
 - `./check.sh` is the gate: `cargo fmt --check`, then `cargo clippy --locked --all-targets -- -D warnings`, then `cargo test --locked`.
+- `.githooks/pre-push` runs `./check.sh` before each push. Turn it on once per clone with `git config core.hooksPath .githooks`. `git push --no-verify` skips it.
 - `[lints.clippy]` in `Cargo.toml` turns on some pedantic and nursery lints, `unwrap_used` among them. `clippy.toml` exempts unit tests, and each `tests/*.rs` file that needs `unwrap` has its own `#![expect]` or `#![allow]`. Outside tests, an `expect` names the invariant that holds, such as a built-in asset or a constant regex.
 - Each `unsafe` block or impl has a `// SAFETY:` comment on the line above that names the invariant it relies on, and each `unsafe fn` has a `# Safety` doc section. Clippy's `undocumented_unsafe_blocks` enforces the comment, and `unnecessary_safety_comment` flags one left on safe code. Before you add a block, check whether the binding or std already has a safe call. When the same call repeats, wrap it once in a small safe function next to its callers, as `tmp::mine` does for `getuid`.
 - CI (`.github/workflows/check.yml`) runs `./check.sh` on every push and pull request, except those that change only `website/`. It runs on a macOS runner, because the renderer and the pty tests need macOS.

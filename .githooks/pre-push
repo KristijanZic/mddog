@@ -1,0 +1,4 @@
+#!/bin/sh
+# Runs the CI checks before a push, so a failure shows here and not in CI.
+# Skip with `git push --no-verify`.
+exec "$(git rev-parse --show-toplevel)/check.sh"
