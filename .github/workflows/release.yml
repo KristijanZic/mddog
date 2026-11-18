@@ -12,6 +12,9 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # The release notes list every commit since the last tag.
+          fetch-depth: 0
       - name: Check the tag matches both versions
         run: |
           set -euo pipefail
@@ -35,7 +38,26 @@ jobs:
             tar czf "mdd-macos-$arch.tar.gz" mdd
             shasum -a 256 "mdd-macos-$arch.tar.gz" > "mdd-macos-$arch.tar.gz.sha256"
           done
-      - run: gh release create "$GITHUB_REF_NAME" mdd-macos-*.tar.gz mdd-macos-*.tar.gz.sha256 --generate-notes
+      - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^")
+          # GitHub's generated notes list only merged pull requests, and most changes go straight to main.
+          {
+            git log --no-merges --format='%H %s' "$prev..$GITHUB_REF_NAME" | while read -r sha subject; do
+              case $subject in "chore: release "*) continue ;; esac
+              # Credit outside contributors by their GitHub login, as GitHub's generated notes did.
+              login=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq '.author.login // empty' || true)
+              by=""
+              if [ -n "$login" ] && [ "$login" != "$GITHUB_REPOSITORY_OWNER" ]; then by=" by @$login"; fi
+              echo "- $subject (${sha:0:7})$by"
+            done
+            echo
+            echo "**Full Changelog**: https://github.com/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"
+          } > notes.md
+      - run: gh release create "$GITHUB_REF_NAME" mdd-macos-*.tar.gz mdd-macos-*.tar.gz.sha256 --notes-file notes.md
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Point the Homebrew formula at this release
