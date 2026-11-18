@@ -479,6 +479,10 @@ impl App {
             };
         }
         if self.help {
+            // Trackpads send sideways wheel events while scrolling up and down, so they must not close help.
+            if let Key::WheelLeft(..) | Key::WheelRight(..) = key {
+                return vec![];
+            }
             let t = self.help_top;
             self.help_top = match (key, scroll_step(key)) {
                 (_, Some((step, true))) => t + self.rows(step),
@@ -1491,6 +1495,15 @@ mod tests {
         keys(&mut a, &[Key::Ctrl('b'), Key::Char('u')]);
         assert!(a.help);
         assert_eq!(a.help_top, 1 + WHEEL);
+    }
+
+    #[test]
+    fn help_stays_open_on_a_sideways_wheel() {
+        let mut a = app(100, 20);
+        a.handle(Key::Char('?'));
+        assert_eq!(a.handle(Key::WheelLeft(1, 1)), vec![]);
+        assert_eq!(a.handle(Key::WheelRight(1, 1)), vec![]);
+        assert!(a.help && a.help_top == 0);
     }
 
     #[test]
