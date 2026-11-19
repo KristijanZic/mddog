@@ -56,6 +56,8 @@ pub struct Theme {
     pub sel_bg: Rgb,
     /// By `Alert as usize`.
     pub alerts: [Rgb; 5],
+    /// Each GitHub alert's bar, which github.com's dark theme draws darker than the title.
+    pub alert_bars: [Rgb; 5],
     /// A copy button's check: the tip alert's green, as on GitHub.
     pub copied: Rgb,
     pub diff_add_bg: Rgb,
@@ -171,6 +173,7 @@ impl Theme {
             sel_bg: c("text-selection"),
             copied: c("alert-tip"),
             alerts: Alert::GITHUB.map(|a| c(&format!("alert-{}", a.title().to_lowercase()))),
+            alert_bars: Alert::GITHUB.map(|a| c(&format!("alert-{}-bar", a.title().to_lowercase()))),
             diff_add_bg: c("diff-add-bg"),
             diff_del_bg: c("diff-del-bg"),
             pl: SyntaxColors {

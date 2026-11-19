@@ -32,7 +32,12 @@
   --mddog-alert-tip: #1a7f37;
   --mddog-alert-important: #8250df;
   --mddog-alert-warning: #9a6700;
-  --mddog-alert-caution: #cf222e;
+  --mddog-alert-caution: #d1242f;
+  --mddog-alert-note-bar: #0969da;
+  --mddog-alert-tip-bar: #1a7f37;
+  --mddog-alert-important-bar: #8250df;
+  --mddog-alert-warning-bar: #9a6700;
+  --mddog-alert-caution-bar: #cf222e;
   --mddog-diff-add-bg: #dafbe1;
   --mddog-diff-del-bg: #ffebe9;
   --mddog-button-bg: #f6f8fa;

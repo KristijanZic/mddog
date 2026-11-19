@@ -414,42 +414,35 @@ impl<'a> Layouter<'a> {
         let y0 = *y;
         let tint = self.th.alert_tint;
         let boxed = (tint > 0.0).then(|| self.rect(x, y0, w, 0.0, mix(col, self.th.bg, tint), self.th.radius * s));
-        let bar = (bw > 0.0).then(|| self.rect(x, y0, bw, 0.0, col, 0.0));
+        let bar_col = self.th.alert_bars.get(k as usize).copied().unwrap_or(col);
+        let bar = (bw > 0.0).then(|| self.rect(x, y0, bw, 0.0, bar_col, 0.0));
         *y += top;
         let ind = bw + side;
-        let right = 0.0;
+        // Obsidian's callout pads 12 px on the right, which a nested callout shows. GitHub's layout here never did.
+        let right = if self.th.look == Look::Obsidian { 12.0 * s } else { 0.0 };
         let r = 8.0 * s;
         let icon = |me: &mut Self, cy: f32| {
-            let icon = if (k as usize) < Alert::GITHUB.len() { Icon::Octicon(k) } else { Icon::Alert(k) };
-            if let Some(bmp) = icons::bitmap(icon, col, (2.0 * r).round() as u32) {
+            if let Some(bmp) = icons::bitmap(Icon::Alert(k), col, (2.0 * r).round() as u32) {
                 me.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
             }
         };
         let (tc, tx) = if self.th.look == Look::Obsidian {
-            // Obsidian's title: the icon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
+            // Obsidian's title: the Lucide icon, 4 px, then 600-weight text on a 1.3 line, icon centered on it.
             let tc = TextStyle { size: 16.0 * s, color: col, bits: SEMIBOLD, lh: 1.3, align: Align::Left, track: 0.0 };
             icon(self, *y + 0.65 * tc.size);
             (tc, x + ind + 2.0 * r + 4.0 * s)
         } else {
+            // GitHub's title: its 16 px Octicon, 8 px, then 500-weight text on a 16 px line.
             let cy = *y + 8.0 * s;
-            let glyph = match k {
-                Alert::Note => Some("i"),
-                Alert::Tip => Some("✦"),
-                Alert::Important | Alert::Warning => Some("!"),
-                Alert::Caution => Some("×"),
-                _ => None,
-            };
-            if let Some(glyph) = glyph {
-                self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Rect { fill: 0, stroke: Some((1.5 * s, 0xff000000 | col)), radius: r });
-                let gf = FontKey::new(11.0 * s, BOLD);
-                let gw = self.fonts.measure(gf, glyph);
-                let (ga, gd) = self.fonts.ascent_descent(gf);
-                self.push(x + ind + r - gw / 2.0, cy - f32::midpoint(ga, gd), gw, ga + gd, Kind::Text { s: glyph.into(), f: gf, color: col, under: false, strike: false, asc: ga, tx: NO_TEXT });
+            if (k as usize) < Alert::GITHUB.len() {
+                if let Some(bmp) = icons::bitmap(Icon::Octicon(k), col, (2.0 * r).round() as u32) {
+                    self.push(x + ind, cy - r, 2.0 * r, 2.0 * r, Kind::Img(bmp));
+                }
             } else {
                 // A kind GitHub doesn't have: Obsidian's icon, in GitHub's place.
                 icon(self, cy);
             }
-            (TextStyle { size: 16.0 * s, color: col, bits: BOLD, lh: 1.0, align: Align::Left, track: 0.0 }, x + ind + 2.0 * r + 8.0 * s)
+            (TextStyle { size: 16.0 * s, color: col, bits: weight(500), lh: 1.0, align: Align::Left, track: 0.0 }, x + ind + 2.0 * r + 8.0 * s)
         };
         let (ty0, tw) = (*y, w - right - (tx - x));
         // A folding callout keeps room for its arrow after the title.

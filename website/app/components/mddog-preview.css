@@ -35,6 +35,9 @@
   --alert-note: #4493f8;
   --alert-tip: #3fb950;
   --alert-warning: #d29922;
+  --alert-note-bar: #1f6feb;
+  --alert-tip-bar: #238636;
+  --alert-warning-bar: #9e6a03;
   --pl-k: #ff7b72;
   --pl-c1: #79c0ff;
   --pl-en: #d2a8ff;
@@ -224,24 +227,30 @@
   background: var(--match-current-bg);
 }
 
-/* Alerts. */
+/* Alerts, as src/render/layout.rs draws them: GitHub's 16 px title line, 500 weight, and a bar that is darker in dark mode. */
 .mdd-alert {
   padding: calc(8 * var(--u)) calc(16 * var(--u));
-  border-left: calc(4 * var(--u)) solid var(--alert);
+  border-left: calc(4 * var(--u)) solid var(--alert-bar);
 }
 
 .mdd-alert-title {
   display: flex;
   align-items: center;
   gap: calc(8 * var(--u));
-  margin-bottom: calc(12 * var(--u)) !important;
+  margin-bottom: calc(16 * var(--u)) !important;
   color: var(--alert);
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1;
 }
 
 .mdd-alert-title svg {
+  flex: none;
   width: calc(16 * var(--u));
   height: calc(16 * var(--u));
+}
+
+.mdd-alert-lucide {
+  display: none;
 }
 
 .mdd-alert > :last-child {
@@ -697,6 +706,9 @@ html:not(.dark) .mdd:not([data-theme]) {
   --match-current-bg: #ff9632;
   --alert-tip: #1a7f37;
   --alert-warning: #9a6700;
+  --alert-note-bar: #0969da;
+  --alert-tip-bar: #1a7f37;
+  --alert-warning-bar: #9a6700;
   --pl-del-bg: #ffebe9;
   --pl-del: #82071e;
   --pl-ins-bg: #dafbe1;
@@ -737,6 +749,8 @@ html:not(.dark) .mdd:not([data-theme]) {
   --text-selection: #c6b8f5;
   --mark-bg: #fff3a3;
   --alert-note: #086ddd;
+  --alert-tip: #00bfbc;
+  --alert-warning: #ec7500;
   --pl-k: #d53984;
   --pl-c1: #7852ee;
   --pl-en: #e0ac00;
@@ -764,6 +778,8 @@ html:not(.dark) .mdd:not([data-theme]) {
   --text-selection: #483699;
   --mark-bg: #5a4a00;
   --alert-note: #027aff;
+  --alert-tip: #53dfdd;
+  --alert-warning: #e9973f;
   --pl-k: #fa99cd;
   --pl-c1: #a882ff;
   --pl-en: #e0de71;
@@ -798,11 +814,26 @@ html:not(.dark) .mdd:not([data-theme]) {
   background: none;
 }
 
+/* Obsidian's callout: a tinted box, its Lucide icon, then 600-weight text on a 1.3 line. */
 .mdd[data-theme^='obsidian'] .mdd-alert {
-  padding: calc(12 * var(--u)) calc(24 * var(--u)) calc(16 * var(--u));
+  padding: calc(12 * var(--u)) calc(12 * var(--u)) calc(28 * var(--u)) calc(24 * var(--u));
   border-left: 0;
   border-radius: calc(4 * var(--u));
   background: color-mix(in srgb, var(--alert) 10%, var(--bg));
+}
+
+.mdd[data-theme^='obsidian'] .mdd-alert-title {
+  gap: calc(4 * var(--u));
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-alert-octicon {
+  display: none;
+}
+
+.mdd[data-theme^='obsidian'] .mdd-alert-lucide {
+  display: block;
 }
 
 .mdd[data-theme^='obsidian'] .mdd-pre {

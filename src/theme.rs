@@ -105,6 +105,7 @@ const TOKENS: &[(&str, Kind)] = &[
     ("code-bg", Kind::Color), ("pre-bg", Kind::Color), ("alt-bg", Kind::Color), ("rule", Kind::Color), ("mark-bg", Kind::Color),
     ("match-bg", Kind::Color), ("match-current-bg", Kind::Color), ("match-fg", Kind::Color), ("match-current-fg", Kind::Color), ("text-selection", Kind::Color),
     ("alert-note", Kind::Color), ("alert-tip", Kind::Color), ("alert-important", Kind::Color), ("alert-warning", Kind::Color), ("alert-caution", Kind::Color),
+    ("alert-note-bar", Kind::Color), ("alert-tip-bar", Kind::Color), ("alert-important-bar", Kind::Color), ("alert-warning-bar", Kind::Color), ("alert-caution-bar", Kind::Color),
     ("diff-add-bg", Kind::Color), ("diff-del-bg", Kind::Color), ("button-bg", Kind::Color),
     // Code.
     ("pl-comment", Kind::Color), ("pl-keyword", Kind::Color), ("pl-string", Kind::Color), ("pl-constant", Kind::Color),
