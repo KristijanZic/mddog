@@ -21,7 +21,7 @@ import { PlanDiagram, PlanDiagramSvg } from '@/components/mddog-previews';
 
 type PreviewProps = { className?: string };
 
-/** How long a copy button shows its check, as COPY_FEEDBACK in src/viewer/preview.rs. */
+/** How long a copy button shows its check, as COPY_FEEDBACK in src/viewer/view.rs. */
 const COPY_FEEDBACK_MS = 2000;
 
 /** Copies text and remembers which button did it, for two seconds. */

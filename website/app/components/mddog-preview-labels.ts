@@ -10,7 +10,7 @@ export const previewLabels = {
   DiagramPreview: 'A Mermaid flowchart and a typeset formula in mddog',
   SearchPreview: 'Search results for "trail" highlighted on the page',
   TocPreview: 'The table of contents open on the left of a document',
-  FileListPreview: 'The file list showing Markdown files with their headings and ages',
+  FileListPreview: 'The file list showing Markdown files with their headings and ages, and a preview of the selected file',
   MarkdownPreview: 'A release plan in mddog with front matter, a note, a task list, tables, lists, a quote, a diff, and a footnote',
   WideTablePreview: 'A wide table with a scroll bar along its bottom edge',
   ClaudeCodePreview: 'Claude Code checks off a goal in plan.md, and the mddog pane beside the chat shows the check at once',

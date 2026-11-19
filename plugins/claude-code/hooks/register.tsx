@@ -213,13 +213,13 @@ export const register: Register = on => {
     await Promise.all([
       $.command.register({
         name: 'mddog',
-        description: 'Preview a Markdown file with mddog in a pane',
+        description: 'View a Markdown file with mddog in a pane',
         argumentHint: '<file.md | @file.md>',
       }),
       $.tool.register({
         name: 'open',
         description:
-          'Show a Markdown file in the mddog preview pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
+          'Show a Markdown file in the mddog pane beside the chat, rendered as a browser shows it (styled like GitHub by default). Use it when the user asks to see, preview, or view a Markdown file. The pane re-renders whenever the file changes, so edit the file to update what they see.',
         inputSchema: {
           type: 'object',
           properties: { path: { type: 'string', description: 'The file, absolute or relative to the working directory' } },
@@ -239,7 +239,7 @@ export const register: Register = on => {
     return {
       text: `Opened ${arg} in the mddog pane.`,
       context: [
-        `The user opened ${arg} (relative to ${cwd}) in a mddog preview pane beside the chat. The pane re-renders whenever the file changes on disk, so to change what they see, edit that file with your usual tools.`,
+        `The user opened ${arg} (relative to ${cwd}) in a mddog pane beside the chat. The pane re-renders whenever the file changes on disk, so to change what they see, edit that file with your usual tools.`,
       ],
     }
   })
@@ -298,7 +298,7 @@ export const register: Register = on => {
       const v = view(e.surface)
       const cols = Math.min(255, Math.floor((e.props.bodyColumns * COLUMN_PX) / MDD_COLUMN_PX))
       if (file && cols > 0 && cols !== v.columns) start($, v, cols, true)
-      if (!file) return <Text dimColor>Run /mddog {'<file.md>'} to preview a file here.</Text>
+      if (!file) return <Text dimColor>Run /mddog {'<file.md>'} to view a file here.</Text>
       if (v.tiles.length === 0) return v.error ? <Text color="red">{v.error}</Text> : <Text dimColor>Rendering {file}…</Text>
       // The read below waits, and a new round may land meanwhile, so the drawing uses this round alone.
       const { tiles, columns } = v
@@ -338,7 +338,7 @@ export const register: Register = on => {
     const v = view(e.surface)
     const cols = Math.min(255, e.props.bodyColumns)
     if (file && cols > 0 && cols !== v.columns) start($, v, cols, false)
-    if (!file) return <Text dimColor>Run /mddog {'<file.md>'} to preview a file here.</Text>
+    if (!file) return <Text dimColor>Run /mddog {'<file.md>'} to view a file here.</Text>
     if (v.tiles.length === 0) return v.error ? <Text color="red">{v.error}</Text> : <Text dimColor>Rendering {file}…</Text>
     const near = nearest(v, e.props.scroll.offset, e.props.scroll.bodyRows)
     return (

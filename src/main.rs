@@ -1,4 +1,4 @@
-use mddog::viewer::preview;
+use mddog::viewer::view;
 use mddog::*;
 
 use std::io::{IsTerminal, Read};
@@ -7,19 +7,19 @@ use std::path::{Path, PathBuf};
 const USAGE: &str = "usage: mdd [file.md|folder]
        command | mdd";
 
-const HELP: &str = "Preview Markdown in your terminal the way a browser renders it.
+const HELP: &str = "View Markdown in your terminal the way a browser renders it.
 
 Usage
-  mdd                       list Markdown files from current repo or folder to preview
-  mdd file.md               preview a Markdown file
-  mdd folder                list Markdown files in a folder to preview
-  command | mdd             preview the output of a command in Markdown format
+  mdd                       list Markdown files from current repo or folder to view
+  mdd file.md               view a Markdown file
+  mdd folder                list Markdown files in a folder to view
+  command | mdd             view the output of a command as Markdown
 
 Options
   -h, --help                show this help
   -V, --version             show the version
 
-In the preview, press ? to list the keys.
+In the viewer, press ? to list the keys.
 ";
 
 fn main() {
@@ -73,26 +73,26 @@ fn main() {
         check_file(Path::new(&file)).unwrap_or_else(|e| fail(&e));
         std::process::exit(headless::run(PathBuf::from(file), cols, webp));
     }
-    if let Some(why) = preview::refusal() {
+    if let Some(why) = view::refusal() {
         eprintln!("{}", fit(&why));
         std::process::exit(1);
     }
     if file.is_empty() || (file != "-" && Path::new(&file).is_dir()) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let root = if file.is_empty() { viewer::picker::scope(&cwd, &cwd) } else { std::fs::canonicalize(&file).unwrap_or_else(|_| PathBuf::from(&file)) };
-        std::process::exit(preview::browse(root));
+        std::process::exit(view::browse(root));
     }
     let code = if file == "-" {
         if stdin_is_tty() {
             eprintln!("{}", fit("mdd: reading Markdown from the keyboard. Type it, then press Ctrl-D to open it, or Ctrl-C to quit."));
         }
         let path = stdin_copy().unwrap_or_else(|e| fail(&e));
-        let code = preview::run(path.clone(), true);
+        let code = view::run(path.clone(), true);
         let _ = std::fs::remove_file(path);
         code
     } else {
         check_file(Path::new(&file)).unwrap_or_else(|e| fail(&e));
-        preview::run(PathBuf::from(file), false)
+        view::run(PathBuf::from(file), false)
     };
     std::process::exit(code);
 }

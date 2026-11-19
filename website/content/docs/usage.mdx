@@ -5,18 +5,18 @@ description: The ways to start mdd, from a file, a folder, or standard input.
 
 ```sh
 mdd                 # list Markdown files in the current directory to pick from
-mdd README.md       # preview a file
+mdd README.md       # view a file
 mdd docs            # pick from the Markdown files in a folder
-cat notes.md | mdd  # preview standard input
+cat notes.md | mdd  # view standard input
 ```
 
-## Preview a file
+## View a file
 
 Run `mdd FILE` to open a file.
 
 If a name has spaces, put quotes around it. If a name starts with `-`, write `./-name.md` or `mdd -- -name.md`.
 
-mddog opens only local files. To preview a file on the web, download it first:
+mddog opens only local files. To view a file on the web, download it first:
 
 ```sh
 curl -sL https://example.com/README.md | mdd
@@ -30,14 +30,14 @@ Run `mdd FOLDER` to list the files in a specific folder instead.
 
 ## Read standard input
 
-When you pipe text into `mdd`, it previews that text as Markdown. For example:
+When you pipe text into `mdd`, it shows that text as Markdown. For example:
 
 ```sh
 cat notes.md | mdd
 gh pr view 123 --json body -q .body | mdd
 ```
 
-You can also run `mdd -` with nothing piped in, then type Markdown on the fly, and press `Ctrl-D` to preview it.
+You can also run `mdd -` with nothing piped in, then type Markdown on the fly, and press `Ctrl-D` to view it.
 
 ## Options
 

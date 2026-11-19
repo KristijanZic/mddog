@@ -73,7 +73,7 @@ pub enum Refused {
     Warp,
 }
 
-/// Where mddog can't show the preview, found before anything goes to the terminal: tmux takes the probe's
+/// Where mddog can't show the page, found before anything goes to the terminal: tmux takes the probe's
 /// graphics query as the pane's title. `var` looks up an environment variable.
 pub fn refused_by_env(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<Refused> {
     if var("TMUX").is_some() {
@@ -128,6 +128,10 @@ impl Probe {
 
     pub fn herdr(&self) -> bool {
         self.version.starts_with("libghostty") || herdr_by_env()
+    }
+
+    pub fn iterm2(&self) -> bool {
+        self.version.starts_with("iTerm2")
     }
 
     /// Ghostty shows kitty image pixels as Display P3 but cell colors as sRGB, unless `window-colorspace = display-p3`.
@@ -907,6 +911,9 @@ mod tests {
         assert_eq!(p.version, "");
         let (p, _) = parse_probe(b"\x1bP>|iTerm2 3.6.6\x1b\\\x1b[?62;22c");
         assert_eq!(p.hand(), "hand2");
+        assert!(p.iterm2());
+        let (p, _) = parse_probe(b"\x1b[6;34;17t\x1bP>|rex 0.1.0-preview.20\x1b\\\x1b[?62;22c");
+        assert!(p.rex() && !p.ghostty());
     }
 
     #[test]

@@ -32,7 +32,7 @@ Run these in each cell, from the repo root. Note anything odd, even if the check
 7. **Local links.** In `README.md`, click the `docs/themes.md` link. The doc opens, and `Backspace` returns to the same place. A link to a non-Markdown file shows "Not a Markdown file".
 8. **Zoom.** `Cmd-+` twice, then `Cmd--` twice. The page lays out again at each font size, with no stale tiles.
 9. **Resize.** Resize the window (and the pane, in a multiplexer). The page lays out again at the new width, with no leftover TOC or status bar.
-10. **Edit and reload.** `e`, change a line, save, quit the editor. The preview shows the change. Append to the file from another shell too, to check live reload.
+10. **Edit and reload.** `e`, change a line, save, quit the editor. The viewer shows the change. Append to the file from another shell too, to check live reload.
 11. **Standard input.** `cat README.md | mdd` paints the page. `mdd -` says it waits for typed input. `Ctrl-D` on empty input exits 2 with usage, and `Ctrl-C` exits 130.
 12. **Quit.** `q`. The shell comes back clean, with no leftover images.
 13. **Panes and tabs** (multiplexer only). Split the pane, switch tabs, and zoom. Images stay in mddog's pane and come back when you return.

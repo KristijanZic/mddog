@@ -286,6 +286,7 @@ export function FileListPreview({ className }: PreviewProps) {
     ['Enter', 'open'],
     ['Esc', 'back'],
     ['Ctrl-u', 'clear'],
+    ['Ctrl-t', 'preview'],
   ];
   return (
     <MddogFrame
@@ -293,24 +294,38 @@ export function FileListPreview({ className }: PreviewProps) {
       className={className}
       bar={<StatusBar left={null} hints={hints} pos={null} />}
     >
-      <div className="mdd-term mdd-mono mdd-files">
-        <div className="mdd-files-head">
+      <div className="mdd-term mdd-files">
+        <div className="mdd-files-head mdd-mono">
           <span className="mdd-bright mdd-b">~/trailmix</span>
           <span className="mdd-dim">11 files</span>
         </div>
-        <div className="mdd-bright mdd-b">
+        <div className="mdd-bright mdd-b mdd-mono">
           {'> '}
           <span className="mdd-cursor" />
         </div>
-        <div className="mdd-files-rule" />
-        {files.map(([path, title, age], i) => (
-          <div key={path} className={cn('mdd-file', i === 0 && 'mdd-file-selected')}>
-            <span />
-            <span>{path}</span>
-            <span>{title}</span>
-            <span>{age}</span>
+        <div className="mdd-files-rule mdd-mono">
+          <span className="mdd-files-label mdd-dim"> notes/gear-review.md </span>
+        </div>
+        <div className="mdd-files-body">
+          <div className="mdd-files-list mdd-mono">
+            {files.map(([path, title, age], i) => (
+              <div key={path} className={cn('mdd-file', i === 0 && 'mdd-file-selected')}>
+                <span />
+                <span>{path}</span>
+                <span>{title}</span>
+                <span>{age}</span>
+              </div>
+            ))}
           </div>
-        ))}
+          <Page>
+            <h1>Gear review: rain jackets</h1>
+            <p>Four jackets, three wet weekends in the Lake District, and one clear winner.</p>
+            <h2>What we tested</h2>
+            <p>Each jacket went out in steady rain for at least six hours, with a full pack.</p>
+            <h2>The winner</h2>
+            <p>The lightest of the four kept us dry the longest, and packed down to the size of a water bottle.</p>
+          </Page>
+        </div>
       </div>
     </MddogFrame>
   );

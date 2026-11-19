@@ -353,6 +353,17 @@ fn image_type(mime: &str) -> bool {
 }
 
 /// Fetches `url` (http or https) and returns its body. Returns `None`, early and silently, once `stop` is set.
+/// The cached response for `url`, with no request, so browsing the file list never contacts an image server.
+pub fn cached_only(url: &str) -> Option<Arc<Vec<u8>>> {
+    if let Some(e) = cached(url) {
+        return Some(e.body.clone());
+    }
+    let e = read_disk(&disk_dir(), url)?;
+    let body = e.body.clone();
+    store(e);
+    Some(body)
+}
+
 pub fn fetch(agent: &ureq::Agent, url: &str, stop: &AtomicBool) -> Option<Result<Arc<Vec<u8>>, Fail>> {
     fetch_in(agent, url, stop, Some(disk_dir()))
 }

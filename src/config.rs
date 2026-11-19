@@ -13,6 +13,7 @@ pub struct Config {
     pub copy_on_select: bool,
     /// How `> [!kind]` blocks read.
     pub callouts: Callouts,
+    pub file_list: FileList,
     /// The `theme` key's themes, read.
     #[serde(skip)]
     pub themes: Themes,
@@ -22,7 +23,99 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, copy_on_select: false, callouts: Callouts::Github, themes }
+        Config { theme, copy_on_select: false, callouts: Callouts::Github, file_list: FileList::default(), themes }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(deny_unknown_fields, default)]
+pub struct FileList {
+    pub preview: ListPreview,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(deny_unknown_fields, default)]
+pub struct ListPreview {
+    pub position: Position,
+    pub size: Size,
+    /// A window narrower than this many columns uses the `narrow_` keys.
+    pub narrow_columns: u16,
+    pub narrow_position: NarrowPosition,
+    /// Unset means `size`.
+    pub narrow_size: Option<Size>,
+    pub show_by_default: bool,
+}
+
+impl Default for ListPreview {
+    fn default() -> ListPreview {
+        ListPreview { position: Position::Right, size: Size::Percent(50), narrow_columns: 120, narrow_position: NarrowPosition::Bottom, narrow_size: None, show_by_default: true }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Position {
+    Right,
+    Left,
+    Top,
+    Bottom,
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum NarrowPosition {
+    Right,
+    Left,
+    Top,
+    Bottom,
+    Hidden,
+}
+
+impl NarrowPosition {
+    pub fn side(self) -> Option<Position> {
+        match self {
+            NarrowPosition::Right => Some(Position::Right),
+            NarrowPosition::Left => Some(Position::Left),
+            NarrowPosition::Top => Some(Position::Top),
+            NarrowPosition::Bottom => Some(Position::Bottom),
+            NarrowPosition::Hidden => None,
+        }
+    }
+}
+
+/// A number of cells, or a percentage of the window's width beside the list, or of the rows under the filter above
+/// or below it.
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(try_from = "RawSize")]
+pub enum Size {
+    Cells(u16),
+    Percent(u16),
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawSize {
+    Cells(i64),
+    Text(String),
+}
+
+impl TryFrom<RawSize> for Size {
+    type Error = String;
+    fn try_from(raw: RawSize) -> Result<Size, String> {
+        let bad = || "expected a number of cells, such as 40, or a percentage, such as \"50%\"".to_string();
+        match raw {
+            RawSize::Cells(n) => u16::try_from(n).ok().filter(|&n| n > 0).map(Size::Cells).ok_or_else(bad),
+            RawSize::Text(t) => t.trim().strip_suffix('%').and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| (1..=99).contains(p)).map(Size::Percent).ok_or_else(bad),
+        }
+    }
+}
+
+impl Size {
+    pub fn of(self, room: u16) -> u16 {
+        match self {
+            Size::Cells(n) => n,
+            Size::Percent(p) => (u32::from(room) * u32::from(p) / 100) as u16,
+        }
     }
 }
 
@@ -226,6 +319,21 @@ mod tests {
     }
 
     #[test]
+    fn file_list_preview() {
+        let c = parse("[file_list.preview]\nposition = \"left\"\nsize = 50\nnarrow_position = \"hidden\"\nnarrow_size = \"30%\"\nshow_by_default = false\n").unwrap();
+        let p = c.file_list.preview;
+        assert_eq!((p.position, p.size, p.narrow_position, p.narrow_size, p.show_by_default), (Position::Left, Size::Cells(50), NarrowPosition::Hidden, Some(Size::Percent(30)), false));
+        assert_eq!(p.narrow_columns, 120);
+        let e = parse("[file_list.preview]\nposition = \"hidden\"\n").unwrap_err();
+        assert!(e.starts_with("line 2: file_list.preview.position: "), "{e}");
+        for bad in ["\"150%\"", "\"0%\"", "0", "-3", "\"big\""] {
+            let e = parse(&format!("[file_list.preview]\nsize = {bad}\n")).unwrap_err();
+            assert!(e.starts_with("line 2: file_list.preview.size: expected a number of cells"), "{bad}: {e}");
+        }
+        assert!(parse("[file_list.preview]\nside = \"right\"\n").is_err());
+    }
+
+    #[test]
     fn theme_pairs_and_files() {
         let dir = std::env::temp_dir().join(format!("mddog-theme-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -265,7 +373,7 @@ mod tests {
         let e = one_line("smooth_scroll = false\n");
         assert!(e.starts_with("line 1: smooth_scroll: "), "{e}");
         let e = one_line("[file_list]\nextensions = [\"md\"]\n");
-        assert!(e.starts_with("line 1: file_list: "), "{e}");
+        assert!(e.starts_with("line 2: file_list.extensions: "), "{e}");
         let e = one_line("[colours]\n");
         assert!(e.starts_with("line 1: colours: "), "{e}");
         let e = one_line("theme = \"dark\n");

@@ -9,7 +9,7 @@ export const whyRows: { label: string; cells: (boolean | string)[] }[] = [
   { label: 'Diagrams and math drawn as graphics', cells: [true, false, 'Some'] },
   { label: 'Images', cells: [true, 'Some', true] },
   { label: 'Live reload', cells: [true, 'Some', true] },
-  { label: 'Preview pane in Claude Code', cells: [true, false, false] },
+  { label: 'Pane in Claude Code', cells: [true, false, false] },
 ];
 
 export const whyNote =

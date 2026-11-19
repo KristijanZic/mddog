@@ -3,12 +3,24 @@ title: File list
 description: Pick a Markdown file from the current repo or folder.
 ---
 
-Run `mdd` with no file input, or press `Ctrl-p` in the preview, to see the Markdown files in the current directory or Git repo, up to 10,000 files.
+mddog provides a file list view that lets you search, browse, and open Markdown files in the current directory or Git repo. Each row shows a file's path, its first heading, and how old it is, and the selected file gets a preview.
 
-Hidden files and the files your `.gitignore` and `.ignore` files leave out are skipped.
+<FileListPreview className="my-6" />
 
-Each row shows the file's path, its first heading, and how old it is. The newest files come first. Type to filter with a fuzzy match on the path and the heading, then press `Enter` to open a file.
+You can open it in one of two ways:
+
+1. Run `mdd` from the terminal without passing a file path
+2. Press `Ctrl-p` inside mddog's viewer
+
+Type to filter with a fuzzy match on the path and the heading, then press `Enter` to open a file. Press `Ctrl-t` to hide or show the preview.
+
+By design, the file list:
+
+* Only shows Markdown files with the extensions `.md` and `.markdown`
+* Excludes hidden files and the files your `.gitignore` and `.ignore` files leave out
+* Shows up to 10,000 files, newest first, or best match first while you type a filter
+* Shows a web image in the preview only if mddog downloaded it recently, when you opened that file. Otherwise the preview shows its alt text
 
 After you open a file from the list, `Backspace` goes back to the file before it, at the same place.
 
-<FileListPreview className="my-6" />
+To configure the layout, see [`[file_list.preview]`](/docs/config#file-list-preview).

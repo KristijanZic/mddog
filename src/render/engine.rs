@@ -82,6 +82,7 @@ pub struct Engine {
     pub scale: Cell<f64>,
     smooth: bool,
     display_p3: Cell<bool>,
+    offline: Cell<bool>,
     st: RefCell<State>,
 }
 
@@ -147,7 +148,7 @@ impl Engine {
             held: None,
             grip: 0.0,
         };
-        Engine { width: Cell::new(width), scale: Cell::new(scale), smooth, display_p3: Cell::new(false), st: RefCell::new(st) }
+        Engine { width: Cell::new(width), scale: Cell::new(scale), smooth, display_p3: Cell::new(false), offline: Cell::new(false), st: RefCell::new(st) }
     }
 
     /// Parses and lays out `src` in place of the page.
@@ -160,6 +161,10 @@ impl Engine {
         st.doc = Some(doc::parse(if src.trim().is_empty() { "*This file is empty.*" } else { src }));
         crate::trace::mark("parsed");
         st.images = Images::new(base.to_path_buf());
+        st.images.offline = self.offline.get();
+        // A preview loads without anyone asking, so an offline engine skips huge local images.
+        st.images.max_local = self.offline.get().then_some(16 << 20);
+        st.images.budget = self.offline.get().then_some(256 << 20);
         let State { doc, images, th, .. } = &mut *st;
         if let Some(doc) = doc {
             let mut srcs = vec![];
@@ -243,6 +248,11 @@ impl Engine {
     /// Draws snapshots in Display P3 rather than sRGB, for a terminal that shows image pixels as Display P3.
     pub fn set_display_p3(&self, on: bool) {
         self.display_p3.set(on);
+    }
+
+    /// Remote images in later loads come only from the cache. A miss shows the alt text.
+    pub fn set_offline(&self, on: bool) {
+        self.offline.set(on);
     }
 
     pub fn rescale(&self, scale: f64, width: f64) {

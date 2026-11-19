@@ -8,6 +8,7 @@ pub mod loading;
 pub mod picker;
 pub mod position;
 pub mod preview;
+pub mod view;
 
 use crate::term::Key;
 
@@ -15,10 +16,13 @@ use crate::term::Key;
 pub enum Event {
     Key(Key),
     Gone(u32),
-    Resize,
+    /// When the signal came.
+    Resize(std::time::Instant),
     FileChanged,
     /// The file list has new entries.
     Listed,
+    /// A file list preview finished drawing.
+    Previewed,
     Quit,
 }
 

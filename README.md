@@ -27,7 +27,7 @@ Other terminal viewers render Markdown with only characters. Code editors render
 | Diagrams and math drawn as graphics   | ✅    | 🚫                          | Some                |
 | Images                                | ✅    | Some                        | ✅                  |
 | Live reload                           | ✅    | Some                        | ✅                  |
-| Preview pane in Claude Code           | ✅    | 🚫                          | 🚫                  |
+| Pane in Claude Code                   | ✅    | 🚫                          | 🚫                  |
 
 <sub><em>Compared in November 2026 to terminal viewers like glow, leaf, mdcat, Frogmouth, and rich-cli, and to the built-in Markdown previews in VS Code, Cursor, Zed, and JetBrains IDEs.</em></sub>
 
@@ -53,7 +53,7 @@ curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 
 ```sh
 mdd             # list Markdown files in the current directory to pick from
-mdd README.md   # preview a file
+mdd README.md   # view a file
 ```
 
 ## Docs

@@ -21,14 +21,14 @@ import { cn } from '@/lib/cn';
 import { homeOptions } from '@/lib/layout.shared';
 import { gitConfig } from '@/lib/shared';
 
-const tagline = 'Preview Markdown in your terminal, with real fonts, tables, diagrams, math, and images.';
+const tagline = 'View Markdown in your terminal, with real fonts, tables, diagrams, math, and images.';
 const repoUrl = `https://github.com/${gitConfig.user}/${gitConfig.repo}`;
 const install = `brew install ${gitConfig.user}/tap/mddog`;
 const plugin = `claude plugin marketplace add ${gitConfig.user}/${gitConfig.repo}
 claude plugin install mddog@mddog`;
-const usage = `mdd README.md       # preview a file
+const usage = `mdd README.md       # view a file
 mdd                 # pick a Markdown file nearby
-cat notes.md | mdd  # preview standard input`;
+cat notes.md | mdd  # view standard input`;
 
 const terminals: { name: string; logo: string; className?: string }[] = [
   { name: 'Ghostty', logo: '/terminals/ghostty.webp' },
@@ -94,7 +94,7 @@ const features: {
     body: (
       <>
         Run <code className="font-mono text-[0.9em]">mdd</code> with no input to list and search Markdown
-        files in your repo, newest first.
+        files in your repo, newest first, with a preview of the selected file.
       </>
     ),
     Preview: FileListPreview,

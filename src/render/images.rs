@@ -44,6 +44,12 @@ pub struct Images {
     rx: Receiver<(String, Option<Arc<Vec<u8>>>)>,
     /// Stops this page's queued and running fetches when a reload replaces it.
     stops: Vec<Arc<std::sync::atomic::AtomicBool>>,
+    /// See `Engine::set_offline`.
+    pub offline: bool,
+    /// Local images bigger than this many bytes show their alt text.
+    pub max_local: Option<u64>,
+    /// Decoded bytes left for raster images. Past it, images show their alt text.
+    pub budget: Option<u64>,
 }
 
 impl Drop for Images {
@@ -70,16 +76,26 @@ impl From<Decoded> for Image {
 }
 
 pub fn decode(data: &[u8]) -> Option<Image> {
-    decoded(data).map(Image::from)
+    decoded(data, false).map(Image::from)
 }
 
-fn decoded(data: &[u8]) -> Option<Decoded> {
+/// `capped` limits the decoded size, for a preview nobody asked to load.
+fn decoded(data: &[u8], capped: bool) -> Option<Decoded> {
     let head = &data[..data.len().min(512)];
     let is_svg = std::str::from_utf8(head).map(|s| s.contains("<svg")).unwrap_or(false) || String::from_utf8_lossy(head).contains("<svg");
     if is_svg {
+        if capped && data.len() > 1 << 20 {
+            return None;
+        }
         return crate::render::svg::svg_tree(data).map(|t| Decoded::Svg(Box::new(t)));
     }
-    let im = image::load_from_memory(data).ok()?.to_rgba8();
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(data)).with_guessed_format().ok()?;
+    if capped {
+        let mut limits = image::Limits::default();
+        (limits.max_image_width, limits.max_image_height, limits.max_alloc) = (Some(8192), Some(8192), Some(128 << 20));
+        reader.limits(limits);
+    }
+    let im = reader.decode().ok()?.to_rgba8();
     let (w, h) = im.dimensions();
     let mut px = im.into_raw();
     for p in px.as_chunks_mut::<4>().0 {
@@ -92,9 +108,10 @@ fn decoded(data: &[u8]) -> Option<Decoded> {
 }
 
 /// Confined to the repo, else home, else the folder; `/` starts at that root, and the query is dropped.
-fn local(dir: &Path, src: &str) -> Option<Decoded> {
+fn local(dir: &Path, src: &str, max: Option<u64>) -> Option<Decoded> {
     let path = crate::render::media::confined_media(src, dir);
-    path.filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file())).and_then(|p| std::fs::read(p).ok()).and_then(|d| decoded(&d))
+    let fits = |m: std::fs::Metadata| m.is_file() && max.is_none_or(|max| m.len() <= max);
+    path.filter(|p| std::fs::metadata(p).is_ok_and(fits)).and_then(|p| std::fs::read(p).ok()).and_then(|d| decoded(&d, max.is_some()))
 }
 
 /// The image sources layout will ask for: all but those in closed `<details>`, which it lays out only once opened.
@@ -122,7 +139,7 @@ pub fn sources(blocks: &[Block], out: &mut Vec<String>) {
 impl Images {
     pub fn new(dir: PathBuf) -> Images {
         let (tx, rx) = channel();
-        Images { dir, map: HashMap::new(), tx, rx, stops: vec![] }
+        Images { dir, map: HashMap::new(), tx, rx, stops: vec![], offline: false, max_local: None, budget: None }
     }
 
     pub fn get(&mut self, src: &str, wanted: &mut Vec<String>) -> Status {
@@ -133,12 +150,19 @@ impl Images {
                 LoadState::Ready(i) => Status::Ready(i.clone()),
             };
         }
+        if is_remote(src) && self.offline {
+            let d = crate::render::remote::cached_only(src).and_then(|d| decoded(&d, self.max_local.is_some()));
+            let state = self.spend(d).map_or(LoadState::Failed, |d| LoadState::Ready(d.into()));
+            self.map.insert(src.to_string(), state);
+            return self.get(src, wanted);
+        }
         if is_remote(src) {
             self.map.insert(src.to_string(), LoadState::Loading);
             wanted.push(src.to_string());
             return Status::Pending;
         }
-        match local(&self.dir, src).map(Image::from) {
+        let d = local(&self.dir, src, self.max_local);
+        match self.spend(d).map(Image::from) {
             Some(i) => {
                 self.map.insert(src.to_string(), LoadState::Ready(i.clone()));
                 Status::Ready(i)
@@ -159,25 +183,42 @@ impl Images {
         if srcs.is_empty() {
             return;
         }
-        let workers = std::thread::available_parallelism().map_or(4, usize::from).min(srcs.len());
+        let cap = if self.max_local.is_some() { 2 } else { usize::MAX };
+        let workers = std::thread::available_parallelism().map_or(4, usize::from).min(srcs.len()).min(cap);
         let next = AtomicUsize::new(0);
-        let (dir, srcs_ref, next_ref) = (&self.dir, &srcs, &next);
+        let left = std::sync::atomic::AtomicU64::new(self.budget.unwrap_or(u64::MAX));
+        let (dir, srcs_ref, next_ref, max, left_ref) = (&self.dir, &srcs, &next, self.max_local, &left);
         let done: Vec<(usize, Option<Decoded>)> = std::thread::scope(|s| {
             let work = move || {
                 let mut got = vec![];
                 loop {
                     let i = next_ref.fetch_add(1, Ordering::Relaxed);
                     let Some(src) = srcs_ref.get(i) else { break got };
-                    got.push((i, local(dir, src)));
+                    let d = local(dir, src, max).filter(|d| {
+                        let cost = if let Decoded::Raster(b) = d { b.px.len() as u64 } else { 0 };
+                        left_ref.try_update(Ordering::Relaxed, Ordering::Relaxed, |l| l.checked_sub(cost)).is_ok()
+                    });
+                    got.push((i, d));
                 }
             };
             // A worker that failed to start leaves its share to the others, and to layout if none started.
             let handles: Vec<_> = (0..workers).filter_map(|_| std::thread::Builder::new().stack_size(crate::render::STACK).spawn_scoped(s, work).ok()).collect();
             handles.into_iter().flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
         });
+        if self.budget.is_some() {
+            self.budget = Some(left.into_inner());
+        }
         for (i, d) in done {
             self.map.insert(srcs[i].clone(), d.map_or(LoadState::Failed, |d| LoadState::Ready(d.into())));
         }
+    }
+
+    fn spend(&mut self, d: Option<Decoded>) -> Option<Decoded> {
+        let d = d?;
+        if let (Some(left), Decoded::Raster(b)) = (self.budget.as_mut(), &d) {
+            *left = left.checked_sub(b.px.len() as u64)?;
+        }
+        Some(d)
     }
 
     /// Fetches through mddog's remote fetcher: its worker pool, cache, and private-address checks.
@@ -246,5 +287,79 @@ mod tests {
         assert!(matches!(images.map.get("a.png"), Some(super::LoadState::Failed)));
         assert!(!images.map.contains_key("https://x.test/r.png"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn offline_skips_local_images_over_the_cap() {
+        use super::{Images, Status};
+        let dir = std::env::temp_dir().join(format!("mddog-imgcap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("dot.png"), crate::term::kitty::png(2, 2, &[255; 16]).unwrap()).unwrap();
+        let mut wanted = vec![];
+        let mut online = Images::new(dir.clone());
+        assert!(matches!(online.get("dot.png", &mut wanted), Status::Ready(_)));
+        let mut capped = Images::new(dir.clone());
+        capped.max_local = Some(10);
+        assert!(matches!(capped.get("dot.png", &mut wanted), Status::Failed));
+        capped.prefetch(vec!["dot.png".into()]);
+        assert!(matches!(capped.get("dot.png", &mut wanted), Status::Failed));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_capped_load_refuses_an_image_too_big_to_decode() {
+        // 20000x1 px compresses to almost nothing but is far wider than any preview needs.
+        let wide = crate::term::kitty::png(20_000, 1, &vec![255; 80_000]).unwrap();
+        assert!(wide.len() < 1 << 20);
+        assert!(super::decoded(&wide, true).is_none());
+        assert!(super::decoded(&wide, false).is_some());
+    }
+
+    #[test]
+    fn a_capped_load_stops_decoding_past_its_budget() {
+        use super::{Images, Status};
+        let dir = std::env::temp_dir().join(format!("mddog-imgbudget-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = crate::term::kitty::png(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        std::fs::write(dir.join("a.png"), &png).unwrap();
+        std::fs::write(dir.join("b.png"), &png).unwrap();
+        let mut wanted = vec![];
+        let mut capped = Images::new(dir.clone());
+        // Room for one 64x64 image.
+        (capped.max_local, capped.budget) = (Some(1 << 20), Some(64 * 64 * 4));
+        assert!(matches!(capped.get("a.png", &mut wanted), Status::Ready(_)));
+        assert!(matches!(capped.get("b.png", &mut wanted), Status::Failed));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn prefetch_spends_the_budget_while_it_decodes() {
+        use super::{Images, Status};
+        let dir = std::env::temp_dir().join(format!("mddog-imgprefetch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = crate::term::kitty::png(64, 64, &[255; 64 * 64 * 4]).unwrap();
+        let names: Vec<String> = (0..6).map(|i| format!("{i}.png")).collect();
+        for n in &names {
+            std::fs::write(dir.join(n), &png).unwrap();
+        }
+        let mut capped = Images::new(dir.clone());
+        (capped.max_local, capped.budget) = (Some(1 << 20), Some(2 * 64 * 64 * 4));
+        capped.prefetch(names.clone());
+        let mut wanted = vec![];
+        let ready = names.iter().filter(|n| matches!(capped.get(n, &mut wanted), Status::Ready(_))).count();
+        assert_eq!(ready, 2);
+        assert_eq!(capped.budget, Some(0));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_capped_load_refuses_a_big_svg() {
+        let mut svg = String::from("<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10'>");
+        while svg.len() < (1 << 20) + 10 {
+            svg.push_str("<rect width='1' height='1'/>");
+        }
+        svg.push_str("</svg>");
+        assert!(super::decoded(svg.as_bytes(), true).is_none());
+        assert!(super::decoded(svg.as_bytes(), false).is_some());
     }
 }

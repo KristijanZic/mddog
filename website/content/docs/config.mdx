@@ -13,6 +13,13 @@ This is a config with every key at its default value:
 theme = "light:github-light,dark:github-dark"
 copy_on_select = false
 callouts = "github"
+
+[file_list.preview]
+position = "right"
+size = "50%"
+narrow_columns = 120
+narrow_position = "bottom"
+show_by_default = true
 ```
 
 In your own config, you only need to set the keys you want to change.
@@ -46,7 +53,7 @@ See [Themes](/docs/themes) for more about themes and how to make your own.
 
 ## `copy_on_select`
 
-In the preview mode, you can select text by dragging it with the mouse or double-clicking to select a word.
+In the viewer, you can select text by dragging it with the mouse or double-clicking to select a word.
 
 By default, `copy_on_select` is set to `false`: selecting text only highlights it, and `Cmd-c` copies it.
 
@@ -64,6 +71,30 @@ Set it to `"obsidian"` to read callouts as [Obsidian](https://help.obsidian.md/c
 > [!faq]- A folded callout with a title
 > Click the title to open it.
 ```
+
+## File list preview
+
+The `[file_list.preview]` table sets where the [file list](/docs/file-list) shows the top of the selected file, and how big it is.
+
+| Key | Default | Description |
+|---|---|---|
+| `position` | `"right"` | Where the preview lives: `"right"`, `"left"`, `"top"`, or `"bottom"` of the list |
+| `size` | `"50%"` | Cells (like `80`), or a percentage of the width (or height, when above or below) |
+| `narrow_position` | `"bottom"` | Where the preview goes in a narrow window: a position, or `"hidden"` |
+| `narrow_columns` | `120` | A window narrower than this many columns is considered narrow |
+| `narrow_size` | same as `size` | The preview's size in a narrow window |
+| `show_by_default` | `true` | `false` starts with the preview hidden |
+
+For example, to keep the preview below the file list, 15 rows tall:
+
+```toml title="~/.config/mddog/config.toml"
+[file_list.preview]
+position = "bottom"
+size = 15
+narrow_position = "bottom"
+```
+
+The file list always keeps at least 40 columns beside the preview, or 10 rows above or below it. A preview that would get fewer than 30 columns, or 8 rows, is hidden.
 
 ## Font smoothing
 

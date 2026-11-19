@@ -502,13 +502,57 @@
 }
 
 .mdd-files-rule {
+  position: relative;
   height: var(--row);
   background: linear-gradient(var(--panel-rule), var(--panel-rule)) center / 100% calc(1.5 * var(--u)) no-repeat;
 }
 
+/* The preview's label sits on the rule above it, as in mddog. */
+.mdd-files-label {
+  position: absolute;
+  left: calc(50% + 2 * var(--cell));
+  background: var(--bg);
+}
+
+.mdd-files {
+  display: flex;
+  flex-direction: column;
+}
+
+.mdd-files-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  margin: 0 calc(-1 * var(--cell));
+}
+
+.mdd-files-list {
+  flex: none;
+  width: 50%;
+  padding: 0 var(--cell);
+  border-right: calc(1.5 * var(--u)) solid var(--panel-rule);
+}
+
+.mdd-files-list .mdd-file > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* mddog cuts a long path at its start, so the file name stays. */
+.mdd-files-list .mdd-file > :nth-child(2) {
+  direction: rtl;
+  text-align: left;
+}
+
+.mdd-files-body .mdd-page {
+  padding-top: calc(12 * var(--u));
+}
+
 .mdd-file {
   display: grid;
-  grid-template-columns: var(--cell) calc(30 * var(--cell)) 1fr auto;
+  grid-template-columns: var(--cell) calc(22 * var(--cell)) 1fr auto;
+  gap: 0 var(--cell);
 }
 
 .mdd-file > :nth-child(2) {

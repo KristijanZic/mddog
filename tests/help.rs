@@ -802,6 +802,69 @@ fn suspends_and_resumes(key: &[u8]) {
     assert_eq!(quit, Some(true));
 }
 
+/// A config with the preview off, for tests that take the next image or file name on screen as the file that opened.
+fn no_preview(dir: &std::path::Path) -> std::path::PathBuf {
+    let cfg = dir.join("cfg");
+    std::fs::create_dir_all(cfg.join("mddog")).unwrap();
+    std::fs::write(cfg.join("mddog/config.toml"), "[file_list.preview]\nshow_by_default = false\n").unwrap();
+    cfg
+}
+
+#[test]
+fn saving_the_selected_file_redraws_its_preview_without_a_key() {
+    let dir = scratch("listsave");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    let file = dir.join("a.md");
+    std::fs::write(&file, "# A title\n").unwrap();
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &env, false);
+    wait_for(&out, 0, b"A title");
+    wait_count(&trace, "preview sent", 1);
+    let sent = std::fs::read_to_string(&trace).unwrap_or_default().matches("preview sent").count();
+    std::thread::sleep(Duration::from_millis(1100));
+    std::fs::write(&file, "# A title\n\nsaved\n").unwrap();
+    wait_count(&trace, "preview sent", sent + 1);
+    tty.write_all(b"\x03").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn deleting_the_selected_file_takes_its_preview_down() {
+    let dir = scratch("listdelete");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    let file = dir.join("a.md");
+    std::fs::write(&file, "# A title\n").unwrap();
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &env, false);
+    wait_for(&out, 0, b"A title");
+    wait_count(&trace, "preview sent", 1);
+    let before = out.lock().unwrap().len();
+    std::fs::remove_file(&file).unwrap();
+    wait_for(&out, before, b"can't show");
+    tty.write_all(b"\x03").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_list_at_startup_takes_the_real_display_scale() {
+    let dir = scratch("listscale");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("a.md"), "# A title\n").unwrap();
+    let trace = dir.join("trace.log");
+    // A 1x display: the engine starts from a 2x guess, which the list must replace before it draws a preview.
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "1")];
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &env, false);
+    wait_for(&out, 0, b"A title");
+    wait_trace(&trace, "scale guess was wrong");
+    tty.write_all(b"\x03").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn bare_mdd_lists_files_and_opens_one() {
     let dir = scratch("list");
@@ -809,7 +872,8 @@ fn bare_mdd_lists_files_and_opens_one() {
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(dir.join("alpha.md"), "# Alpha title\n\ntext\n").unwrap();
     std::fs::write(dir.join("sub/beta.md"), "# Beta title\n\ntext\n").unwrap();
-    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir.join("sub")), 80, &[], false);
+    let cfg = no_preview(&dir);
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir.join("sub")), 80, &[("XDG_CONFIG_HOME", cfg.to_str().unwrap())], false);
     let list = wait_for(&out, 0, b"Beta title");
     let probe = wait_for(&out, 0, b"\x1b[c");
     wait_for(&out, 0, b"Alpha title");
@@ -844,7 +908,9 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
     let mut reply = probe_reply((18, 38));
     reply.splice(0..0, *b"\x1b[?1016;2$y");
     let trace = dir.join("trace.log");
-    let Viewer { mut child, tty, out } = start_replying(env!("CARGO_BIN_EXE_mdd").as_ref(), &[dir.to_str().unwrap()], None, 80, (18, 38), reply, &[("MDDOG_TRACE", trace.to_str().unwrap())], false);
+    let cfg = no_preview(&dir);
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("XDG_CONFIG_HOME", cfg.to_str().unwrap())];
+    let Viewer { mut child, tty, out } = start_replying(env!("CARGO_BIN_EXE_mdd").as_ref(), &[dir.to_str().unwrap()], None, 80, (18, 38), reply, &env, false);
     wait_for(&out, 0, b"\x1b[c");
     wait_for(&out, 0, b"Title 5");
     // A bigger font: the same 80 by 40 cells, 50 pixels tall.
@@ -884,7 +950,9 @@ fn a_pixel_click_in_the_list_follows_a_font_size_change() {
 fn esc_in_the_startup_list_quits_and_in_a_file_goes_back() {
     let dir = scratch("listesc");
     std::fs::write(dir.join("a.md"), "# A title\n").unwrap();
-    let Viewer { mut child, mut tty, out } = start(&[dir.to_str().unwrap()], None, 80, &[], false);
+    let cfg = no_preview(&dir);
+    let env = [("XDG_CONFIG_HOME", cfg.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = start(&[dir.to_str().unwrap()], None, 80, &env, false);
     wait_for(&out, 0, b"A title");
     wait_for(&out, 0, b"\x1b[c");
     std::thread::sleep(Duration::from_millis(300));
@@ -897,7 +965,7 @@ fn esc_in_the_startup_list_quits_and_in_a_file_goes_back() {
     let alive = exits_within(&mut child, Duration::from_millis(500)).is_none();
     tty.write_all(b"q").unwrap();
     let first = exits_within(&mut child, LIMIT);
-    let Viewer { mut child, mut tty, out } = start(&[dir.to_str().unwrap()], None, 80, &[], false);
+    let Viewer { mut child, mut tty, out } = start(&[dir.to_str().unwrap()], None, 80, &env, false);
     wait_for(&out, 0, b"A title");
     wait_for(&out, 0, b"\x1b[c");
     std::thread::sleep(Duration::from_millis(300));
@@ -1219,17 +1287,18 @@ fn backspace_after_a_file_switch_and_resize_returns_to_the_same_text() {
     wait_for(&out, probe, b"zulu.md");
     std::thread::sleep(Duration::from_millis(300));
     tty.write_all(b"gfm\r").unwrap();
-    wait_for(&out, probe, b"a=p,");
+    // Not an image or a name on screen, which the preview shows too.
+    wait_count(&trace, "file opened", 1);
     tty.write_all(&b"j".repeat(60)).unwrap();
     std::thread::sleep(Duration::from_millis(500));
     let before = top_after(&trace, "key Char('j')");
     tty.write_all(b"5").unwrap();
     top_after(&trace, "key Char('5')");
     tty.write_all(b"\x10\x15").unwrap();
-    let list = wait_for(&out, probe, b"zulu.md");
+    wait_for(&out, probe, b"zulu.md");
     std::thread::sleep(Duration::from_millis(300));
     tty.write_all(b"zulu\r").unwrap();
-    wait_for(&out, list, b" zulu.md ");
+    wait_count(&trace, "file opened", 2);
     // A narrower terminal wraps gfm.md onto more rows when it comes back.
     let size = libc::winsize { ws_row: 40, ws_col: 60, ws_xpixel: 60 * 18, ws_ypixel: 40 * 38 };
     resize(&tty, size);

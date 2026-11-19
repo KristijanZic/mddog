@@ -77,24 +77,25 @@ The renderer. It turns Markdown into pixels and knows nothing about terminals. I
 
 **Architecture invariant:** math, Mermaid diagrams, and local images are ready when layout runs, so they are in the first paint. Only remote images arrive late. They draw as their alt text first, and the page is laid out again when they arrive.
 
-**Architecture invariant:** `render::remote` is the only code that uses the network.
+**Architecture invariant:** `render::remote` is the only code that uses the network. An engine set offline (the file list's preview) reads only its cache.
 
 ### `src/viewer/`
 
 The interactive viewer and the file list.
 
-- `preview.rs`: `Preview`, the viewer itself. It runs the event loop, owns the `Engine`, writes to the terminal, and carries out the actions that `App` returns. `Preview::show` is the one path that draws the page.
+- `view.rs`: `Viewer`, the viewer itself. It runs the event loop, owns the `Engine`, writes to the terminal, and carries out the actions that `App` returns. `Viewer::show` is the one path that draws the page.
 - `app.rs`: `App`, the state machine that turns a key or mouse event into `Action`s (scroll, glide, search, contents, history).
 - `chrome.rs` and `keys.rs`: the status row, the contents sidebar, and the `?` screen, drawn as terminal text from `App`. `keys.rs` is the one list of keys that the `?` screen shows.
 - `cache.rs`: `Cache`, the tiles the terminal holds: their ids, the bytes they use, which to free, and the bands used under herdr and Rex.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.
-- `picker.rs`: the file list.
+- `picker.rs`: the file list, and how it shares the screen with the preview.
+- `preview.rs`: `Preview`, the file list's preview: the top screen of the selected file, drawn on a worker thread with its own `Engine` and kept off the network.
 - `link.rs` and `clipboard.rs`: following links, and copying text.
 
 **Architecture invariant:** `app.rs` holds no terminal or engine state. It depends only on `term::Key`. So it is tested row by row against `docs/behavior.md` without a terminal. `chrome.rs` is pure in the same way.
 
-**Architecture invariant:** `cache.rs` does not write to the terminal. `Preview` passes it a function that draws a tile, so its tests use a fake.
+**Architecture invariant:** `cache.rs` does not write to the terminal. `Viewer` passes it a function that draws a tile, so its tests use a fake.
 
 **Architecture invariant:** the viewer never passes a local path to the system `open` command. A cloned repo could link to an app or a `.command` file. A link to a local Markdown file opens inside mddog, and only when the file is inside the repo (else the home folder, else the folder of the file shown).
 
@@ -140,7 +141,9 @@ A Claude Code plugin that shows a page in a pane next to the chat. It is TypeScr
 
 The main thread owns the `Engine`, the `App` state, the tile cache, and the terminal writes. One other thread writes to the terminal: the loading skeleton (`viewer/loading.rs`) draws its frames on its own thread until the page is ready. Both write under the `term::WRITE` lock, so their bytes never mix. The main thread blocks on one channel of `viewer::Event`s. The input thread, the signal thread, the file watcher, and the file list's walker send to that channel.
 
-`Engine` is neither `Send` nor `Sync`: its state sits in `RefCell`s and holds `Rc` data. So only the main thread calls it. Inside `Engine::load`, highlighting, Mermaid builds, and local image decoding run on worker threads, and `load` waits for them before layout. Remote fetches run on their own pool and hand their results back through a channel that the main thread polls. Remote images are decoded on the main thread when they arrive. The highlight and Mermaid memos are thread-local to the main thread.
+`Engine` is neither `Send` nor `Sync`: its state sits in `RefCell`s and holds `Rc` data. So only the main thread calls it. Inside `Engine::load`, highlighting, Mermaid builds, and local image decoding run on worker threads, and `load` waits for them before layout. Remote fetches run on their own pool and hand their results back through a channel that the main thread polls. Remote images are decoded on the main thread when they arrive. The highlight and Mermaid memos are thread-local to the thread that calls the engine.
+
+The file list's preview (`viewer/preview.rs`) is the one exception to "only the main thread". Its worker thread creates its own `Engine` and keeps it, so no engine ever crosses threads. It sends finished tiles in shared memory back to the main thread, which sends them to the terminal.
 
 Headless mode has the same rule: the engine and every snapshot stay on its main thread. Besides the engine's own workers, it has a signal thread, the file watcher, and threads that encode the image files.
 

@@ -17,3 +17,19 @@ copy_on_select = false
 # with no title. "obsidian" reads it as Obsidian does: any kind and its aliases, a title on the first line,
 # a fold marker (+ or -), and nested callouts.
 callouts = "github"
+
+# The file list (Ctrl-p) shows the top of the selected file next to the list. Ctrl-t hides or shows it until you quit.
+[file_list.preview]
+# Which side of the list it goes on: "right", "left", "top" or "bottom".
+position = "right"
+# Cells, such as 80, or a percentage of the width (or height, when above or below), such as "50%".
+# The list always keeps at least 40 columns, or 10 rows, and a preview under 30 columns, or 8 rows, is hidden.
+size = "50%"
+# A window narrower than this many columns uses narrow_position and narrow_size instead.
+narrow_columns = 120
+# Where the preview goes in a narrow window: "right", "left", "top", "bottom", or "hidden".
+narrow_position = "bottom"
+# The preview's size in a narrow window. Leave it out to use size.
+# narrow_size = "50%"
+# false starts with the preview hidden, and Ctrl-t shows it.
+show_by_default = true
