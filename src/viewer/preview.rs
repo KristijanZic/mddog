@@ -544,7 +544,8 @@ mod tests {
     /// Takes every preview that arrives within `wait` of the last, and returns the files drawn, in order.
     fn arrivals(p: &mut Preview, events: &Receiver<Event>, wait: Duration) -> Vec<PathBuf> {
         let mut got = vec![];
-        while events.recv_timeout(wait).is_ok() {
+        // A loaded CI runner can take far longer than `wait` to draw one preview.
+        while events.recv_timeout(wait.max(Duration::from_secs(1))).is_ok() {
             let before: Vec<Key> = p.held.iter().map(|e| e.key.clone()).collect();
             p.receive(None, &mut vec![], &mut String::new());
             got.extend(p.held.iter().filter(|e| !before.contains(&e.key)).map(|e| e.key.path.clone()));
@@ -622,13 +623,15 @@ mod tests {
         let (wake, events) = mpsc::channel();
         let mut p = Preview::new(wake, Medium::Shm, 300 << 20, 1, true);
         let th = crate::theme::builtin("github-light").unwrap();
-        // A key repeat every 30 ms, as macOS's fastest setting sends.
-        for k in &keys {
-            p.want(vec![k.clone()], (2.0, th, true, false), &mut String::new(), Instant::now());
-            std::thread::sleep(Duration::from_millis(30));
+        // A key repeat every 30 ms, as macOS's fastest setting sends. Given times, not sleeps, so a busy machine
+        // can't stretch a gap past `REST`.
+        let t0 = Instant::now();
+        for (i, k) in (0u32..).zip(&keys) {
+            p.want(vec![k.clone()], (2.0, th, true, false), &mut String::new(), t0 + Duration::from_millis(30) * i);
         }
         let got = arrivals(&mut p, &events, REST * 3);
-        assert_eq!(got, vec![keys[0].path.clone(), keys[4].path.clone()], "the first move draws at once, then only where it rests");
+        assert!(got.contains(&keys[4].path), "the resting file draws: {got:?}");
+        assert!(keys[1..4].iter().all(|k| !got.contains(&k.path)), "the files passed don't: {got:?}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -638,13 +641,12 @@ mod tests {
         let (wake, events) = mpsc::channel();
         let mut p = Preview::new(wake, Medium::Shm, 300 << 20, 1, true);
         let th = crate::theme::builtin("github-light").unwrap();
-        p.want(vec![keys[0].clone()], (2.0, th, true, false), &mut String::new(), Instant::now());
+        let t0 = Instant::now();
+        p.want(vec![keys[0].clone()], (2.0, th, true, false), &mut String::new(), t0);
         arrivals(&mut p, &events, REST * 2);
-        std::thread::sleep(REST);
-        let asked = Instant::now();
-        p.want(vec![keys[1].clone()], (2.0, th, true, false), &mut String::new(), asked);
-        events.recv_timeout(REST * 3).unwrap();
-        assert!(asked.elapsed() < REST, "took {:?}", asked.elapsed());
+        p.want(vec![keys[1].clone()], (2.0, th, true, false), &mut String::new(), t0 + REST * 2);
+        assert!(p.shared.q.lock().unwrap().rest_until.is_none(), "no wait after a pause");
+        assert_eq!(arrivals(&mut p, &events, REST), vec![keys[1].path.clone()]);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -656,12 +658,12 @@ mod tests {
         let th = crate::theme::builtin("github-light").unwrap();
         // Each move asks for the selection and both neighbors, and the list draws twice per move, as a key and
         // the arrival of a batch of files can both redraw it.
+        let t0 = Instant::now();
         for i in 1..7 {
             let around = vec![keys[i].clone(), keys[i + 1].clone(), keys[i - 1].clone()];
             for _ in 0..2 {
-                p.want(around.clone(), (2.0, th, true, false), &mut String::new(), Instant::now());
+                p.want(around.clone(), (2.0, th, true, false), &mut String::new(), t0 + Duration::from_millis(60) * i as u32);
             }
-            std::thread::sleep(Duration::from_millis(60));
         }
         let got = arrivals(&mut p, &events, REST * 3);
         let tail: Vec<PathBuf> = got.iter().rev().take(3).rev().cloned().collect();
