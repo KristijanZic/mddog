@@ -241,12 +241,9 @@ impl App {
         if !(self.help || self.expanded) || (press && on_hint) {
             return None;
         }
-        if !press {
+        // Help has no close button, so only its "?" hint or a key closes it.
+        if !press || self.help {
             return Some(vec![]);
-        }
-        if self.help {
-            self.help = false;
-            return Some(vec![Action::Help]);
         }
         self.expanded = false;
         Some(vec![Action::Collapse])
@@ -488,10 +485,12 @@ impl App {
                 (_, Some((step, true))) => t + self.rows(step),
                 (_, Some((step, false))) => t.saturating_sub(self.rows(step)),
                 (Key::Char('q' | 'Q') | Key::Ctrl('c'), _) => return vec![Action::Quit],
-                _ => {
+                (Key::Char('?') | Key::Esc, _) => {
                     self.help = false;
                     0
                 }
+                // Only the keys help names close it, so a stray key is not lost.
+                _ => return vec![],
             };
             return vec![Action::Help];
         }
@@ -1522,14 +1521,21 @@ mod tests {
     }
 
     #[test]
-    fn help_closes_on_any_key() {
+    fn help_closes_only_on_its_hinted_keys() {
         let mut a = app(100, 20);
         assert_eq!(a.handle(Key::Char('?')), vec![Action::Help]);
         assert!(a.help);
         assert_eq!(a.handle(Key::Char('j')), vec![Action::Help]);
         assert!(a.help && a.help_top == 1);
-        assert_eq!(a.handle(Key::Char('x')), vec![Action::Help]);
+        for k in [Key::Char('x'), Key::Char('/'), Key::Enter] {
+            assert_eq!(a.handle(k), vec![], "{k:?}");
+            assert!(a.help && a.help_top == 1 && a.prompt.is_none(), "{k:?}");
+        }
+        assert_eq!(a.handle(Key::Char('?')), vec![Action::Help]);
         assert!(!a.help && a.scroll == 0);
+        a.handle(Key::Char('?'));
+        assert_eq!(a.handle(Key::Esc), vec![Action::Help]);
+        assert!(!a.help);
         a.handle(Key::Char('?'));
         assert_eq!(a.handle(Key::Char('q')), vec![Action::Quit]);
     }
@@ -1694,15 +1700,15 @@ mod tests {
     }
 
     #[test]
-    fn a_click_closes_help_or_the_expanded_diagram_first() {
+    fn a_click_keeps_help_open_and_closes_the_expanded_diagram() {
         let mut a = app(100, 20);
         assert_eq!(a.modal_click(true, false), None);
         a.help = true;
         assert_eq!(a.modal_click(false, false), Some(vec![]));
+        assert_eq!(a.modal_click(true, false), Some(vec![]));
         assert!(a.help);
         assert_eq!(a.modal_click(true, true), None);
-        assert_eq!(a.modal_click(true, false), Some(vec![Action::Help]));
-        assert!(!a.help);
+        a.help = false;
         a.expanded = true;
         assert_eq!(a.modal_click(false, false), Some(vec![]));
         assert!(a.expanded);
