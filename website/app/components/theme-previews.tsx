@@ -84,7 +84,7 @@ function ThemeWindow({ theme, front }: { theme: Theme; front: boolean }) {
             </strong>
             , <del>strikethrough</del>, <code>inline code</code>, and <kbd>Ctrl</kbd> + <kbd>c</kbd>. Water is H
             <sub>2</sub>O, energy is <span dangerouslySetInnerHTML={{ __html: energy }} />, and a link to{' '}
-            <a className="mdd-ext">GitHub Docs</a>.
+            <a className="mdd-ext" href="https://docs.github.com" tabIndex={-1}>GitHub Docs</a>.
           </p>
           <Alert kind="note">
             <p>Alerts and &gt; quotes render too.</p>
@@ -93,7 +93,7 @@ function ThemeWindow({ theme, front }: { theme: Theme; front: boolean }) {
             <li>
               <Check />
               <span>
-                Task with a <a className="mdd-ext">link</a>
+                Task with a <a className="mdd-ext" href="https://docs.github.com" tabIndex={-1}>link</a>
               </span>
             </li>
             <li className="mdd-nested">

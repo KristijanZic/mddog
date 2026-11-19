@@ -31,12 +31,12 @@ mdd                 # pick a Markdown file nearby
 cat notes.md | mdd  # preview standard input`;
 
 const terminals: { name: string; logo: string; className?: string }[] = [
-  { name: 'Ghostty', logo: '/terminals/ghostty.png' },
-  { name: 'iTerm2', logo: '/terminals/iterm2.png' },
+  { name: 'Ghostty', logo: '/terminals/ghostty.webp' },
+  { name: 'iTerm2', logo: '/terminals/iterm2.webp' },
   // kitty's cat isn't a square tile, so it is scaled past its box to look as big as the others.
   { name: 'kitty', logo: '/terminals/kitty.svg', className: 'scale-125' },
   { name: 'WezTerm', logo: '/terminals/wezterm.svg' },
-  { name: 'Rex', logo: '/terminals/rex.png' },
+  { name: 'Rex', logo: '/terminals/rex.webp' },
 ];
 
 // `wide` features take a full row, with the preview on the given side. The rest sit in pairs.
@@ -151,6 +151,7 @@ function Hero() {
           alt="The mddog dog, reading a book"
           width={384}
           height={255}
+          fetchPriority="high"
           className="order-first w-52 sm:w-64 lg:order-none lg:mr-4 lg:w-96"
         />
       </div>

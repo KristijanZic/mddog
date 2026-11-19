@@ -37,11 +37,14 @@ export function No() {
 export function WhyMddogTable({ className }: { className?: string }) {
   return (
     <div className={cn('not-prose text-sm', className)}>
-      <div className="overflow-x-auto rounded-xl border">
+      {/* Focusable and named so keyboard users can scroll it on narrow screens. */}
+      <div tabIndex={0} role="region" aria-label="mddog compared to other Markdown viewers" className="overflow-x-auto rounded-xl border">
         <Table className="min-w-xl [&_td]:text-sm [&_th]:text-sm">
           <Table.Header>
             <Table.Row>
-              <Table.Head />
+              <Table.Head>
+                <span className="sr-only">Feature</span>
+              </Table.Head>
               {columns.map((c, i) => (
                 <Table.Head key={c} className={cn('w-1/5 text-center', i === 0 && cn(mddogColumn, 'text-fd-foreground'))}>
                   {c}
@@ -52,7 +55,10 @@ export function WhyMddogTable({ className }: { className?: string }) {
           <Table.Body>
             {rows.map((row) => (
               <Table.Row key={row.label}>
-                <Table.Cell>{row.label}</Table.Cell>
+                {/* A row header, styled as a plain cell (Kumo's Table.Head has no scope prop), so each mark is read with its feature. */}
+                <th scope="row" className="!border-b-0 !bg-transparent !font-normal">
+                  {row.label}
+                </th>
                 {row.cells.map((cell, i) => (
                   <Table.Cell key={columns[i]} className={cn('text-center', i === 0 && mddogColumn)}>
                     <Mark value={cell} strong={i === 0} />
