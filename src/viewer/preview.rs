@@ -255,6 +255,10 @@ impl Preview {
         self.wanted.as_ref()
     }
 
+    fn index(&self, key: &Key) -> Option<usize> {
+        self.held.iter().position(|e| &e.key == key)
+    }
+
     fn holds(&self, key: &Key) -> bool {
         self.held.iter().any(|e| &e.key == key)
     }
@@ -360,10 +364,9 @@ impl Preview {
 
     /// Until `key`'s preview is ready, the last one stays, so the preview never flashes empty.
     pub fn place(&mut self, key: Option<&Key>, area: Area, out: &mut String) {
-        let find = |k: &Key| self.held.iter().position(|e| &e.key == k);
-        let at = match key.and_then(&find) {
+        let at = match key.and_then(|k| self.index(k)) {
             Some(i) => Some(i),
-            None if key.is_some() => self.shown.as_ref().filter(|s| key.is_some_and(|k| (s.width, s.height) == (k.width, k.height))).and_then(&find),
+            None if key.is_some() => self.shown.as_ref().filter(|s| key.is_some_and(|k| (s.width, s.height) == (k.width, k.height))).and_then(|s| self.index(s)),
             None => None,
         };
         // The file shown moves to the end, the last to go.
