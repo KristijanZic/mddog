@@ -79,6 +79,7 @@ pub struct Snapshot<B> {
 
 pub struct Engine {
     width: Cell<f64>,
+    max_width: Cell<f64>,
     pub scale: Cell<f64>,
     smooth: bool,
     display_p3: Cell<bool>,
@@ -148,7 +149,7 @@ impl Engine {
             held: None,
             grip: 0.0,
         };
-        Engine { width: Cell::new(width), scale: Cell::new(scale), smooth, display_p3: Cell::new(false), offline: Cell::new(false), st: RefCell::new(st) }
+        Engine { width: Cell::new(width), max_width: Cell::new(f64::INFINITY), scale: Cell::new(scale), smooth, display_p3: Cell::new(false), offline: Cell::new(false), st: RefCell::new(st) }
     }
 
     /// Parses and lays out `src` in place of the page.
@@ -190,7 +191,13 @@ impl Engine {
 
     fn relayout(&self, st: &mut State) {
         let Some(doc) = st.doc.take() else { return };
-        let o = Opts { width: (self.width.get() * self.scale.get()) as f32, scale: self.scale.get() as f32, wrap_code: st.wrap, toggled: st.toggled.clone() };
+        let o = Opts {
+            width: (self.width.get() * self.scale.get()) as f32,
+            scale: self.scale.get() as f32,
+            max_width: (self.max_width.get() * self.scale.get()) as f32,
+            wrap_code: st.wrap,
+            toggled: st.toggled.clone(),
+        };
         let before = st.page.diagrams.len();
         let State { fonts, th, images, .. } = st;
         fonts.set_scale(o.scale);
@@ -255,10 +262,11 @@ impl Engine {
         self.offline.set(on);
     }
 
-    pub fn rescale(&self, scale: f64, width: f64) {
+    pub fn rescale(&self, scale: f64, width: f64, max_width: f64) {
         let ratio = (scale / self.scale.get()) as f32;
         self.scale.set(scale);
         self.width.set(width);
+        self.max_width.set(max_width);
         let mut st = self.st.borrow_mut();
         // Sideways offsets are in layout pixels, so they scale with the page to stay on the same text.
         for o in &mut st.ov.hoff {
@@ -267,11 +275,12 @@ impl Engine {
         self.relayout(&mut st);
     }
 
-    pub fn resize(&self, width: f64) {
-        if (width - self.width.get()).abs() < 0.5 {
+    pub fn resize(&self, width: f64, max_width: f64) {
+        if (width - self.width.get()).abs() < 0.5 && (max_width == self.max_width.get() || (max_width - self.max_width.get()).abs() < 0.5) {
             return;
         }
         self.width.set(width);
+        self.max_width.set(max_width);
         let mut st = self.st.borrow_mut();
         self.relayout(&mut st);
     }

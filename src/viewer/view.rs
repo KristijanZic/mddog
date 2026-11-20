@@ -1302,7 +1302,7 @@ impl Viewer {
         trace::mark("scale guess was wrong");
         self.display = real;
         let (_, css_width) = self.fit();
-        self.engine.rescale(self.scale, css_width);
+        self.engine.rescale(self.scale, css_width, self.max_css());
         if let Some(l) = &self.loader {
             l.tune(self.scale, (self.cell_w, self.cell_h), self.size);
         }
@@ -1327,10 +1327,14 @@ impl Viewer {
     /// Gives the engine the page width, and the page scale when a font zoom changed it.
     fn size_engine(&self, css_width: f64) {
         if self.engine.scale.get() == self.scale {
-            self.engine.resize(css_width);
+            self.engine.resize(css_width, self.max_css());
         } else {
-            self.engine.rescale(self.scale, css_width);
+            self.engine.rescale(self.scale, css_width, self.max_css());
         }
+    }
+
+    fn max_css(&self) -> f64 {
+        f64::from(u32::from(config::get().max_width.0) * self.cell_w) / self.scale
     }
 
     /// Takes the terminal's size and returns the TOC width and the page width in CSS pixels.

@@ -27,7 +27,7 @@ fn a_rescale_keeps_a_wide_block_on_the_same_text() {
     let e = engine(&wide);
     e.code_scroll_view(0.0, 400.0, 80.0);
     let saved = e.code_positions();
-    e.rescale(1.0, 640.0);
+    e.rescale(1.0, 640.0, f64::INFINITY);
     assert!(at_left(&e), "a font zoom moved the block sideways");
     let small = Engine::new(640.0, 1.0, false);
     small.load(&wide, std::path::Path::new("."), false, mddog::theme::builtin("github-light").unwrap_or_else(|| unreachable!()));
@@ -286,4 +286,37 @@ fn search_marks_are_dark_text_on_a_bright_box() {
             assert!(lo < 15.0 && hi > 150.0, "{theme} match {i}: darkest {lo:.0}, brightest {hi:.0}");
         }
     }
+}
+
+#[test]
+fn a_wide_window_centers_the_page_at_its_max_width() {
+    let src = format!("{}\n\n| head | {} |\n|---|---|\n| cell | {} |\n\n```\n{}\n```\n", "word ".repeat(300), "wide ".repeat(80), "wide ".repeat(80), "x".repeat(600));
+    let e = engine(&src);
+    e.resize(2000.0, 800.0);
+    let words = e.search("word", None);
+    let (left, right) = words.iter().map(|m| m[0]).fold((f64::MAX, 0.0f64), |(l, r), m| (l.min(m[0]), r.max(m[0] + m[2])));
+    assert!((left - 624.0).abs() < 1.0, "text starts at {left}");
+    assert!(right <= 1376.0 && right > 1300.0, "text ends at {right}");
+    for m in e.search("wide", None) {
+        assert!(m[0][0] >= 624.0 && m[0][0] + m[0][2] <= 1376.0, "a table cell left the column: {:?}", m[0]);
+    }
+    e.search_clear();
+    let code = e.layout().blocks[2];
+    let y = code.top + code.height / 2.0;
+    assert!(e.code_scroll(300.0, y, 40.0).is_empty(), "the left margin scrolled the code block");
+    assert!(!e.code_scroll(1000.0, y, 40.0).is_empty(), "the code block didn't scroll");
+    e.resize(700.0, 800.0);
+    let left = e.search("word", None).iter().map(|m| m[0][0]).fold(f64::MAX, f64::min);
+    assert!((left - 24.0).abs() < 1.0, "a narrow window starts text at {left}");
+}
+
+#[test]
+fn wide_display_math_scrolls_inside_the_page_column() {
+    let src = format!("$$\n{}\n$$\n", "x + ".repeat(200) + "x");
+    let e = engine(&src);
+    e.resize(2000.0, 800.0);
+    let math = e.layout().blocks[0];
+    let y = math.top + math.height / 2.0;
+    assert!(e.code_scroll(300.0, y, 40.0).is_empty(), "the left margin scrolled the equation");
+    assert!(!e.code_scroll(1000.0, y, 40.0).is_empty(), "the wide equation didn't scroll");
 }

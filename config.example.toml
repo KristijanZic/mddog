@@ -18,6 +18,11 @@ copy_on_select = false
 # a fold marker (+ or -), and nested callouts.
 callouts = "github"
 
+# The page's widest width, in terminal cells. A wider window centers the page, with equal margins on each side.
+# 100 sits between GitHub's file view (1012 px, about 120 characters) and Obsidian's readable line length
+# (700 px, about 85 to 90 characters). Use 20 or more, or a large number such as 10000 for no cap.
+max_width = 100
+
 # The file list (Ctrl-p) shows the top of the selected file next to the list. Ctrl-t hides or shows it until you quit.
 [file_list.preview]
 # Which side of the list it goes on: "right", "left", "top" or "bottom".

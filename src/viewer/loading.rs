@@ -29,6 +29,7 @@ pub struct Look {
     pub muted: Rgb,
     pub pad_cols: u16,
     pub pad_rows: u16,
+    pub max_cols: u16,
 }
 
 impl Look {
@@ -37,7 +38,16 @@ impl Look {
         let bg = t.palette.bg;
         let (s, b) = (theme::channels(t.palette.skeleton), theme::channels(bg));
         let pad = |px: u32| (f64::from(crate::render::layout::PAD) * scale / f64::from(px.max(1))).round() as u16;
-        Look { dark: t.dark, bg, lift: std::array::from_fn(|i| f64::from(s[i]) - f64::from(b[i])), bar_bg: t.palette.bar_bg, muted: t.palette.fg_muted, pad_cols: pad(cell.0), pad_rows: pad(cell.1) }
+        Look {
+            dark: t.dark,
+            bg,
+            lift: std::array::from_fn(|i| f64::from(s[i]) - f64::from(b[i])),
+            bar_bg: t.palette.bar_bg,
+            muted: t.palette.fg_muted,
+            pad_cols: pad(cell.0),
+            pad_rows: pad(cell.1),
+            max_cols: crate::config::get().max_width.0,
+        }
     }
 
     fn mix(&self, k: f64) -> Rgb {
@@ -238,8 +248,10 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
         let (line, w) = term::fit(&format!(" {name} "), cols);
         out.push_str(&format!("\x1b[0m{}{}\x1b[{};1H{}{}{line}{}\x1b[0m", sgr(4, look.bg), term::CLEAR, size.rows, sgr(4, look.bar_bg), sgr(3, look.muted), " ".repeat(cols - w)));
     }
-    let pad = usize::from(look.pad_cols).min(cols / 4);
-    let width = cols - 2 * pad;
+    let page = cols.min(usize::from(look.max_cols));
+    let pad = usize::from(look.pad_cols).min(page / 4);
+    let left = (cols - page) / 2 + pad;
+    let width = page - 2 * pad;
     let span = width + 2 * width / 3;
     let lead = (i % SWEEP) * span / SWEEP;
     let (bar, shine, code) = (look.bar(), look.shine(), look.code());
@@ -253,7 +265,7 @@ pub fn frame(i: usize, name: &str, size: Size, look: &Look, full: bool) -> Strin
         };
         let inset = if matches!(line, Code(_)) { 2.min(width / 4) } else { 0 };
         let len = (width - 2 * inset) * usize::from(pct) / 100;
-        out.push_str(&format!("\x1b[{row};{}H{}", pad + 1, sgr(4, ground)));
+        out.push_str(&format!("\x1b[{row};{}H{}", left + 1, sgr(4, ground)));
         if matches!(line, Code(_)) {
             out.push_str(&" ".repeat(inset));
         }
@@ -333,6 +345,15 @@ mod tests {
         let code = format!("\x1b[12;4H{}  {}", theme::bg(DARK.code()), " ".repeat(32));
         assert!(f.contains(&code), "{f:?}");
         assert!(!f.contains("\x1b[30;"));
+    }
+
+    #[test]
+    fn a_wide_terminal_centers_the_skeleton_at_the_max_width() {
+        let wide = Look { max_cols: 100, ..*DARK };
+        let f = frame(SWEEP - 1, "a.md", Size { cols: 200, rows: 30, ..SIZE }, &wide, false);
+        let bar = format!("{}{}", theme::bg(DARK.bg), theme::fg(DARK.bar()));
+        assert!(f.contains(&format!("\x1b[4;54H{bar}{}", "▀".repeat(94))), "{f:?}");
+        assert!(!f.contains("\x1b[4;4H"));
     }
 
     #[test]

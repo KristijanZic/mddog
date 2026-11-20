@@ -16,6 +16,7 @@ pub struct Opts {
     pub width: f32,
     /// Device pixels per CSS pixel.
     pub scale: f32,
+    pub max_width: f32,
     pub wrap_code: bool,
     /// Details blocks the user toggled (by id).
     pub toggled: HashSet<usize>,
@@ -170,9 +171,10 @@ pub fn layout(fonts: &mut Fonts, th: &Theme, o: &Opts, doc: &Doc, images: &mut I
     l.page.urls = doc.links.clone();
     l.page.w = o.width;
     let s = l.s;
-    let mx = PAD * s;
+    let col = o.width.min(o.max_width);
+    let mx = ((o.width - col) / 2.0).floor() + PAD * s;
     let mut y = PAD * s;
-    let w = (o.width - 2.0 * mx).max(40.0 * s);
+    let w = (col - 2.0 * PAD * s).max(40.0 * s);
     for (i, b) in doc.blocks.iter().enumerate() {
         if i > 0 {
             y += l.gap(&doc.blocks[i - 1], b, false);
@@ -323,8 +325,15 @@ impl<'a> Layouter<'a> {
                 let pad = 8.0 * s;
                 let bx = x + ((w - mb.w) / 2.0).max(0.0);
                 let by = *y + pad;
+                let scroll = mb.w > w + 0.5;
+                let old_clip = self.clip;
+                if scroll {
+                    self.page.hscroll.push(HScroll { x, y: *y, w, h: h + 2.0 * pad + 12.0 * s, max: mb.w - w, bar_y: *y + h + 2.0 * pad + 4.0 * s });
+                    self.clip = self.page.hscroll.len() as u16;
+                }
                 self.emit_math(&mb, bx, by + mb.asc, self.th.text, true);
-                *y += h + 2.0 * pad;
+                self.clip = old_clip;
+                *y += h + 2.0 * pad + if scroll { 12.0 * s } else { 0.0 };
             }
             Block::Mermaid(src) => self.mermaid(src, x, w, y),
             Block::Details { summary, open, body, id } => {

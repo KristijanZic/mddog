@@ -13,6 +13,7 @@ This is a config with every key at its default value:
 theme = "light:github-light,dark:github-dark"
 copy_on_select = false
 callouts = "github"
+max_width = 100
 
 [file_list.preview]
 position = "right"
@@ -71,6 +72,18 @@ Set it to `"obsidian"` to read callouts as [Obsidian](https://help.obsidian.md/c
 > [!faq]- A folded callout with a title
 > Click the title to open it.
 ```
+
+## `max_width`
+
+This value caps the page's width, in terminal cells. The default is `100`.
+
+In a window wider than that, mddog centers the page with equal margins on the left and right.
+
+```toml
+max_width = 120
+```
+
+The value must be 20 or more. To turn the cap off, set a value wider than any window, such as `10000`.
 
 ## File list preview
 

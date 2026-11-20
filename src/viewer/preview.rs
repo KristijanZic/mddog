@@ -30,6 +30,7 @@ pub struct Key {
     pub mtime: SystemTime,
     /// Device pixels.
     pub width: u32,
+    pub max_width: u32,
     pub height: u32,
     pub cell_h: u32,
     /// By address: `config::theme()` hands out one of two static themes.
@@ -142,6 +143,7 @@ fn draw(engine: &mut Option<Engine>, job: &Job) -> Option<Vec<(u32, Shm)>> {
     let k = &job.key;
     let css_w = f64::from(k.width) / job.scale;
     let css_h = f64::from(k.height) / job.scale;
+    let css_max = f64::from(k.max_width) / job.scale;
     let e = engine.get_or_insert_with(|| {
         let e = Engine::new(css_w, job.scale, job.smooth);
         e.set_offline(true);
@@ -149,9 +151,9 @@ fn draw(engine: &mut Option<Engine>, job: &Job) -> Option<Vec<(u32, Shm)>> {
     });
     e.set_display_p3(job.display_p3);
     if (e.scale.get() - job.scale).abs() > f64::EPSILON {
-        e.rescale(job.scale, css_w);
+        e.rescale(job.scale, css_w, css_max);
     } else {
-        e.resize(css_w);
+        e.resize(css_w, css_max);
     }
     let src = read_start(&k.path)?;
     let base = crate::render::images::base_dir(&k.path, false);
@@ -441,7 +443,15 @@ impl Preview {
 }
 
 pub fn key(path: &Path, mtime: SystemTime, area: Area, cell_w: u32, cell_h: u32, theme: &'static Theme) -> Key {
-    Key { path: path.to_path_buf(), mtime, width: u32::from(area.cols) * cell_w, height: u32::from(area.rows) * cell_h, cell_h, theme: std::ptr::from_ref(theme) as usize }
+    Key {
+        path: path.to_path_buf(),
+        mtime,
+        width: u32::from(area.cols) * cell_w,
+        max_width: u32::from(crate::config::get().max_width.0) * cell_w,
+        height: u32::from(area.rows) * cell_h,
+        cell_h,
+        theme: std::ptr::from_ref(theme) as usize,
+    }
 }
 
 #[cfg(test)]
@@ -477,7 +487,7 @@ mod tests {
     }
 
     fn key(name: &str) -> Key {
-        Key { path: PathBuf::from(name), mtime: SystemTime::UNIX_EPOCH, width: 400, height: 170, cell_h: 17, theme: 0 }
+        Key { path: PathBuf::from(name), mtime: SystemTime::UNIX_EPOCH, width: 400, max_width: u32::MAX, height: 170, cell_h: 17, theme: 0 }
     }
 
     #[test]

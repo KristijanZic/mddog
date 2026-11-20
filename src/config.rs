@@ -13,6 +13,7 @@ pub struct Config {
     pub copy_on_select: bool,
     /// How `> [!kind]` blocks read.
     pub callouts: Callouts,
+    pub max_width: MaxWidth,
     pub file_list: FileList,
     /// The `theme` key's themes, read.
     #[serde(skip)]
@@ -23,7 +24,7 @@ impl Default for Config {
     fn default() -> Config {
         let theme = ThemeSpec::default();
         let themes = theme.load(Path::new("")).expect("built-in themes");
-        Config { theme, copy_on_select: false, callouts: Callouts::Github, file_list: FileList::default(), themes }
+        Config { theme, copy_on_select: false, callouts: Callouts::Github, max_width: MaxWidth(100), file_list: FileList::default(), themes }
     }
 }
 
@@ -116,6 +117,17 @@ impl Size {
             Size::Cells(n) => n,
             Size::Percent(p) => (u32::from(room) * u32::from(p) / 100) as u16,
         }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(try_from = "i64")]
+pub struct MaxWidth(pub u16);
+
+impl TryFrom<i64> for MaxWidth {
+    type Error = String;
+    fn try_from(n: i64) -> Result<MaxWidth, String> {
+        u16::try_from(n).ok().filter(|&n| n >= 20).map(MaxWidth).ok_or_else(|| "expected a number of cells, 20 or more, such as 100".to_string())
     }
 }
 
@@ -316,6 +328,16 @@ mod tests {
         assert_eq!((c.themes.light.name.as_str(), c.themes.dark), ("github-dark", None));
         assert!(c.copy_on_select);
         assert_eq!(c.callouts, Callouts::Obsidian);
+    }
+
+    #[test]
+    fn max_width() {
+        assert_eq!(parse("").unwrap().max_width, MaxWidth(100));
+        assert_eq!(parse("max_width = 80\n").unwrap().max_width, MaxWidth(80));
+        for bad in ["0", "19", "-1", "70000", "\"wide\""] {
+            let e = parse(&format!("max_width = {bad}\n")).unwrap_err();
+            assert!(e.starts_with("line 1: max_width: "), "{bad}: {e}");
+        }
     }
 
     #[test]
