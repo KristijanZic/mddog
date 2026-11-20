@@ -43,6 +43,25 @@ Or, without Homebrew:
 curl -fsSL https://raw.githubusercontent.com/qu8n/mddog/main/install.sh | sh
 ```
 
+Or, with Nix:
+
+```sh
+nix run github:qu8n/mddog            # run directly
+nix profile add github:qu8n/mddog    # install imperatively
+```
+
+Or add it declaratively to your system `flake.nix` inputs:
+
+```nix
+inputs.mddog = {
+  url = "github:qu8n/mddog";
+  # Optional on Apple Silicon: follow your own nixpkgs input
+  # inputs.nixpkgs.follows = "nixpkgs";
+};
+```
+
+Then include `inputs.mddog.packages.${pkgs.stdenv.hostPlatform.system}.default` in your packages list.
+
 ### Requirements
 
 - macOS
