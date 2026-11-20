@@ -1387,7 +1387,7 @@ fn a_relative_link_opens_the_file_at_its_heading_and_backspace_returns() {
     std::thread::sleep(Duration::from_millis(500));
     // The third link names a script, which must not run.
     tty.write_all(b"\x1b[<0;20;13M\x1b[<0;20;13m").unwrap();
-    let refused = wait_for(&out, missing, b"Not a Markdown file: setup.command");
+    let refused = wait_for(&out, missing, b"Not a .md or .markdown file: setup.command");
     std::thread::sleep(Duration::from_millis(500));
     // The fourth link names a folder, which opens its README.
     tty.write_all(b"\x1b[<0;20;18M\x1b[<0;20;18m").unwrap();
@@ -1398,4 +1398,83 @@ fn a_relative_link_opens_the_file_at_its_heading_and_backspace_returns() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(landed.starts_with("\"Deep"), "b.md opened at {landed}, not at its heading");
     assert_eq!(quit, Some(true));
+}
+
+fn extensions_config(dir: &std::path::Path) -> std::path::PathBuf {
+    let cfg = dir.join("cfg");
+    std::fs::create_dir_all(cfg.join("mddog")).unwrap();
+    std::fs::write(cfg.join("mddog/config.toml"), "[file_list]\nextensions = [\"md\", \"qmd\"]\n\n[file_list.preview]\nshow_by_default = false\n").unwrap();
+    cfg
+}
+
+#[test]
+fn configured_extensions_set_did_you_mean_and_the_folder_hint() {
+    let dir = scratch("extcli");
+    std::fs::create_dir_all(dir.join("empty")).unwrap();
+    std::fs::write(dir.join("notes.qmd"), "# Notes\n").unwrap();
+    let cfg = extensions_config(&dir);
+    let run = |arg: &str, cfg: Option<&std::path::Path>| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_mdd"));
+        c.args(["--headless", "40"]).arg(dir.join(arg)).env("MDDOG_CACHE_DIR", test_cache()).env("XDG_CONFIG_HOME", cfg.unwrap_or(&dir.join("none")));
+        String::from_utf8(c.output().unwrap().stderr).unwrap()
+    };
+    assert!(run("notes.qm", Some(&cfg)).contains(&format!("Did you mean {}?", dir.join("notes.qmd").display())), "{}", run("notes.qm", Some(&cfg)));
+    assert!(!run("notes.qm", None).contains("Did you mean"), "{}", run("notes.qm", None));
+    assert!(run("empty", Some(&cfg)).contains("is a folder, not a file. Give a .md or .qmd file"), "{}", run("empty", Some(&cfg)));
+    assert!(run("empty", None).contains("Give a .md or .markdown file"), "{}", run("empty", None));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn configured_extensions_fill_the_file_list() {
+    let dir = scratch("extlist");
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    std::fs::write(dir.join("report.qmd"), "# Quarto title\n").unwrap();
+    std::fs::write(dir.join("other.rmd"), "# R title\n").unwrap();
+    std::fs::write(dir.join("zeta.md"), "# Zeta title\n").unwrap();
+    let cfg = extensions_config(&dir);
+    let Viewer { mut child, mut tty, out } = start(&[], Some(&dir), 80, &[("XDG_CONFIG_HOME", cfg.to_str().unwrap())], false);
+    wait_for(&out, 0, b"Quarto title");
+    wait_for(&out, 0, b"Zeta title");
+    assert!(find(&out.lock().unwrap(), b"R title").is_none(), "the list showed a .rmd file");
+    tty.write_all(b"\x03").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn qmd_only_config(dir: &std::path::Path) -> std::path::PathBuf {
+    let cfg = dir.join("qcfg");
+    std::fs::create_dir_all(cfg.join("mddog")).unwrap();
+    std::fs::write(cfg.join("mddog/config.toml"), "[file_list]\nextensions = [\"qmd\"]\n").unwrap();
+    cfg
+}
+
+#[test]
+fn the_folder_hint_follows_configured_extensions() {
+    let dir = scratch("extreadme");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::write(dir.join("docs/README.md"), "# Md\n").unwrap();
+    std::fs::write(dir.join("docs/README.qmd"), "# Qmd\n").unwrap();
+    let hint = |cfg: &std::path::Path| {
+        let out = Command::new(env!("CARGO_BIN_EXE_mdd")).args(["--headless", "40"]).arg(dir.join("docs")).env("MDDOG_CACHE_DIR", test_cache()).env("XDG_CONFIG_HOME", cfg).output().unwrap();
+        String::from_utf8(out.stderr).unwrap()
+    };
+    let qmd = hint(&qmd_only_config(&dir));
+    assert!(qmd.contains(&format!("Did you mean {}?", dir.join("docs/README.qmd").display())), "{qmd}");
+    let default = hint(&dir.join("none"));
+    assert!(default.contains(&format!("Did you mean {}?", dir.join("docs/README.md").display())), "{default}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_not_listed_notice_names_the_configured_extensions() {
+    let dir = scratch("extnotice");
+    let file = dir.join("notes.md");
+    std::fs::write(&file, "# Notes\n").unwrap();
+    let cfg = qmd_only_config(&dir);
+    let Viewer { mut child, mut tty, out } = open(file.to_str().unwrap(), 100, &[("XDG_CONFIG_HOME", cfg.to_str().unwrap())]);
+    wait_for(&out, 0, b"Not a .qmd file, shown as Markdown");
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = std::fs::remove_dir_all(&dir);
 }

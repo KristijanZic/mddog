@@ -144,10 +144,9 @@ fn check_file(path: &Path) -> Result<(), String> {
         Err(e) => return Err(format!("{shown}: {}", term::io_error(&e))),
     };
     if meta.is_dir() {
-        let readme = std::fs::read_dir(path).ok().and_then(|d| d.flatten().map(|e| e.path()).find(|p| p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("readme.md"))));
-        return Err(match readme {
+        return Err(match viewer::picker::readmes(path).into_iter().next() {
             Some(r) => format!("{shown} is a folder. Did you mean {}?", term::printable(&r.display().to_string())),
-            None => format!("{shown} is a folder, not a file. Give a {} file", viewer::picker::EXTENSION_NAMES),
+            None => format!("{shown} is a folder, not a file. Give a {} file", config::get().file_list.names()),
         });
     }
     let mut head = Vec::new();

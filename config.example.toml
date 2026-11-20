@@ -23,6 +23,12 @@ callouts = "github"
 # (700 px, about 85 to 90 characters). Use 20 or more, or a large number such as 10000 for no cap.
 max_width = 100
 
+[file_list]
+# The file extensions the file list (mdd, mdd FOLDER, Ctrl-p) shows, that "Did you mean" picks from,
+# and that a relative link opens in mddog. This is the full list. Write each one without the dot.
+# mdd FILE opens any text file, whatever its extension.
+extensions = ["md", "markdown"]
+
 # The file list (Ctrl-p) shows the top of the selected file next to the list. Ctrl-t hides or shows it until you quit.
 [file_list.preview]
 # Which side of the list it goes on: "right", "left", "top" or "bottom".

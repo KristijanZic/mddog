@@ -29,7 +29,7 @@ Run these in each cell, from the repo root. Note anything odd, even if the check
 4. **Scroll.** `j` `k`, `Space` `b`, `g` `G`, and the mouse wheel, many times down and then many times up, paced and in a fast burst. No blank or stale tiles, no tearing, no lag.
 5. **Overlays.** `?` help, `t` table of contents (also `t` twice fast), `/` search with `n` `N`. Each opens and closes cleanly.
 6. **Mouse.** Click a heading link. Drag to select, then `Cmd-c`. Check the clipboard with `pbpaste`. With `copy_on_select = true`, the drag alone copies.
-7. **Local links.** In `README.md`, click the `docs/themes.md` link. The doc opens, and `Backspace` returns to the same place. A link to a non-Markdown file shows "Not a Markdown file".
+7. **Local links.** In `README.md`, click the `docs/themes.md` link. The doc opens, and `Backspace` returns to the same place. A link to a non-Markdown file shows "Not a .md or .markdown file".
 8. **Zoom.** `Cmd-+` twice, then `Cmd--` twice. The page lays out again at each font size, with no stale tiles.
 9. **Resize.** Resize the window (and the pane, in a multiplexer). The page lays out again at the new width, with no leftover TOC or status bar.
 10. **Edit and reload.** `e`, change a line, save, quit the editor. The viewer shows the change. Append to the file from another shell too, to check live reload.

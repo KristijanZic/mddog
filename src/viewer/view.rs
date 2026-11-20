@@ -445,7 +445,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
     } else if std::str::from_utf8(&p.stamp).is_err() {
         p.notify("Some bytes are not UTF-8 and show as �");
     } else if !p.stdin && !picker::listed(&p.file) {
-        p.notify("Not a .md file, shown as Markdown");
+        p.notify(&format!("Not a {} file, shown as Markdown", crate::config::get().file_list.names()));
     }
     p.start_threads(leftover);
     p.event_loop();

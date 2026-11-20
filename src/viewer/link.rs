@@ -60,13 +60,13 @@ pub fn follow(url: &str, dir: &Path) -> Follow {
         let name = folder.file_name().map_or_else(|| folder.display().to_string(), |n| n.to_string_lossy().into_owned());
         // Through the same check as a link, so a README that is a symlink can't leave the repo.
         let inside = |p: PathBuf| crate::render::media::confined_media(&format!("{}/{}", raw.trim_end_matches('/'), p.file_name()?.to_str()?), dir);
-        return match readmes(folder).into_iter().find_map(inside) {
+        return match super::picker::readmes(folder).into_iter().find_map(inside) {
             Some(path) => Follow::Show(path, heading),
             None => Follow::Refuse(format!("No README in {name}")),
         };
     }
-    if !shown.ends_with('/') && !is_markdown(Path::new(&shown)) {
-        return Follow::Refuse(format!("Not a Markdown file: {name}"));
+    if !shown.ends_with('/') && !super::picker::listed(Path::new(&shown)) {
+        return Follow::Refuse(format!("Not a {} file: {name}", crate::config::get().file_list.names()));
     }
     match found {
         Some(path) if !shown.ends_with('/') => Follow::Show(path, heading),
@@ -77,22 +77,6 @@ pub fn follow(url: &str, dir: &Path) -> Follow {
 /// The URL text with `%XX` decoded, or as written when the bytes aren't UTF-8.
 fn decode(s: &str) -> String {
     crate::render::media::percent_decode(s).unwrap_or_else(|| s.to_string())
-}
-
-/// The folder's `README.md` and `README.markdown` files, in any case, `.md` first.
-fn readmes(folder: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
-    let mut found: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file() && p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("readme")) && is_markdown(p))
-        .collect();
-    found.sort_by_key(|p| (!p.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")), p.clone()));
-    found
-}
-
-/// Whether the viewer shows `path`.
-fn is_markdown(path: &Path) -> bool {
-    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
 }
 
 pub fn open(url: String) {
@@ -154,7 +138,7 @@ mod tests {
         assert_eq!(follow("guide.md#caf%C3%A9", &dir), Follow::Show(dir.join("guide.md"), Some("café".into())));
         assert_eq!(follow("guide%2Emd", &dir), Follow::Show(dir.join("guide.md"), None));
         assert_eq!(follow("guide%2emd#a%20b", &dir), Follow::Show(dir.join("guide.md"), Some("a b".into())));
-        assert_eq!(follow("sh%2Ecommand", &dir), Follow::Refuse("Not a Markdown file: sh.command".into()));
+        assert_eq!(follow("sh%2Ecommand", &dir), Follow::Refuse("Not a .md or .markdown file: sh.command".into()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -190,7 +174,7 @@ mod tests {
         std::fs::write(dir.join("setup.command"), "").unwrap();
         std::fs::write(dir.join("doc.pdf"), "").unwrap();
         for (url, name) in [("setup.command", "setup.command"), ("doc.pdf#p", "doc.pdf"), ("file:///bin/sh", "sh")] {
-            assert_eq!(follow(url, &dir), Follow::Refuse(format!("Not a Markdown file: {name}")));
+            assert_eq!(follow(url, &dir), Follow::Refuse(format!("Not a .md or .markdown file: {name}")));
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

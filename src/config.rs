@@ -28,10 +28,46 @@ impl Default for Config {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(deny_unknown_fields, default)]
 pub struct FileList {
     pub preview: ListPreview,
+    #[serde(deserialize_with = "extensions")]
+    pub extensions: Vec<String>,
+}
+
+impl Default for FileList {
+    fn default() -> FileList {
+        FileList { preview: ListPreview::default(), extensions: vec!["md".into(), "markdown".into()] }
+    }
+}
+
+impl FileList {
+    pub fn shows(&self, p: &Path) -> bool {
+        p.extension().and_then(|e| e.to_str()).is_some_and(|e| self.extensions.iter().any(|x| e.eq_ignore_ascii_case(x)))
+    }
+
+    pub fn names(&self) -> String {
+        let e: Vec<String> = self.extensions.iter().map(|x| format!(".{x}")).collect();
+        match &e[..] {
+            [] => String::new(),
+            [one] => one.clone(),
+            [a, b] => format!("{a} or {b}"),
+            [rest @ .., last] => format!("{}, or {last}", rest.join(", ")),
+        }
+    }
+}
+
+fn extensions<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    use serde::de::Error;
+    let list = Vec::<String>::deserialize(d)?;
+    if list.is_empty() {
+        return Err(D::Error::custom("needs at least one extension, such as \"md\""));
+    }
+    if let Some(e) = list.iter().find(|e| e.is_empty() || e.contains('.')) {
+        return Err(D::Error::custom(format!("{e:?} is not an extension. Write each one without the dot, such as \"md\"")));
+    }
+    Ok(list.iter().map(|e| e.to_ascii_lowercase()).collect())
 }
 
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -356,6 +392,35 @@ mod tests {
     }
 
     #[test]
+    fn file_list_extensions() {
+        let d = Config::default().file_list;
+        assert_eq!(d.extensions, ["md", "markdown"]);
+        assert_eq!(d.names(), ".md or .markdown");
+        let f = parse("[file_list]\nextensions = [\"MD\", \"markdown\", \"Qmd\"]\n").unwrap().file_list;
+        assert_eq!(f.extensions, ["md", "markdown", "qmd"]);
+        assert_eq!(f.preview, ListPreview::default());
+        for yes in ["a.qmd", "a/b.QMD", "c.md", "d.Markdown"] {
+            assert!(f.shows(Path::new(yes)), "{yes}");
+        }
+        for no in ["a.rmd", "qmd", "a.qmd.bak", "a.txt"] {
+            assert!(!f.shows(Path::new(no)), "{no}");
+        }
+        assert_eq!(f.names(), ".md, .markdown, or .qmd");
+        assert_eq!(parse("[file_list]\nextensions = [\"qmd\"]\n").unwrap().file_list.names(), ".qmd");
+        for (bad, why) in [
+            ("[]", "needs at least one extension"),
+            ("[\".md\"]", "\".md\" is not an extension"),
+            ("[\"md\", \"\"]", "\"\" is not an extension"),
+            ("[\"a.b\"]", "\"a.b\" is not an extension"),
+            ("\"md\"", ""),
+        ] {
+            let e = parse(&format!("[file_list]\nextensions = {bad}\n")).unwrap_err();
+            assert!(e.starts_with(&format!("line 2: file_list.extensions: {why}")), "{bad}: {e}");
+            assert!(!e.contains('\n'), "{e}");
+        }
+    }
+
+    #[test]
     fn theme_pairs_and_files() {
         let dir = std::env::temp_dir().join(format!("mddog-theme-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -394,8 +459,6 @@ mod tests {
         assert!(e.starts_with("line 1: mermaid: "), "{e}");
         let e = one_line("smooth_scroll = false\n");
         assert!(e.starts_with("line 1: smooth_scroll: "), "{e}");
-        let e = one_line("[file_list]\nextensions = [\"md\"]\n");
-        assert!(e.starts_with("line 2: file_list.extensions: "), "{e}");
         let e = one_line("[colours]\n");
         assert!(e.starts_with("line 1: colours: "), "{e}");
         let e = one_line("theme = \"dark\n");

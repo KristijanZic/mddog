@@ -141,15 +141,16 @@ pub fn scope(start: &Path, cwd: &Path) -> PathBuf {
     start.ancestors().find(|d| d.join(".git").exists()).map_or_else(|| cwd.to_path_buf(), Path::to_path_buf)
 }
 
-/// The extensions the file list shows, lowercase.
-const EXTENSIONS: [&str; 2] = ["md", "markdown"];
-
-/// The extensions for a sentence.
-pub const EXTENSION_NAMES: &str = ".md or .markdown";
-
-/// Whether the file list shows `p`: a `.md` or `.markdown` file, in any case.
 pub fn listed(p: &Path) -> bool {
-    p.extension().and_then(|e| e.to_str()).is_some_and(|e| EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
+    crate::config::get().file_list.shows(p)
+}
+
+pub fn readmes(folder: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(folder) else { return Vec::new() };
+    let mut found: Vec<PathBuf> =
+        entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.is_file() && p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("readme")) && listed(p)).collect();
+    found.sort_by_key(|p| (!p.extension().is_some_and(|e| e.eq_ignore_ascii_case("md")), p.clone()));
+    found
 }
 
 /// The text of the first ATX heading, outside front matter and code fences.
@@ -666,7 +667,7 @@ mod tests {
     use crate::config::{NarrowPosition, Size};
 
     #[test]
-    fn listed_is_md_or_markdown_in_any_case() {
+    fn listed_by_default_is_md_or_markdown_in_any_case() {
         for f in ["a.md", "a.MD", "a.markdown", "dir.d/a.Markdown"] {
             assert!(listed(Path::new(f)), "{f}");
         }

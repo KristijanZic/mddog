@@ -89,7 +89,7 @@ The interactive viewer and the file list.
 - `cache.rs`: `Cache`, the tiles the terminal holds: their ids, the bytes they use, which to free, and the bands used under herdr and Rex.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.
-- `picker.rs`: the file list, and how it shares the screen with the preview.
+- `picker.rs`: the file list, and how it shares the screen with the preview. `picker::listed` is the one check of `file_list.extensions`, used by the list, "Did you mean", the not-Markdown notice, and link following.
 - `preview.rs`: `Preview`, the file list's preview: the top screen of the selected file, drawn on a worker thread with its own `Engine` and kept off the network.
 - `link.rs` and `clipboard.rs`: following links, and copying text.
 

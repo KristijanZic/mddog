@@ -15,6 +15,9 @@ copy_on_select = false
 callouts = "github"
 max_width = 100
 
+[file_list]
+extensions = ["md", "markdown"]
+
 [file_list.preview]
 position = "right"
 size = "50%"
@@ -84,6 +87,15 @@ max_width = 120
 ```
 
 The value must be 20 or more. To turn the cap off, set a value wider than any window, such as `10000`.
+
+## File list extensions
+
+`file_list.extensions` sets which files the [file list](/docs/file-list) shows and which relative links open in mddog. It replaces the default list, so keep `md` and `markdown` when you add one:
+
+```toml title="~/.config/mddog/config.toml"
+[file_list]
+extensions = ["md", "markdown", "qmd"]
+```
 
 ## File list preview
 
