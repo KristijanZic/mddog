@@ -14,6 +14,7 @@ use super::loading::Loader;
 use super::picker::{self, Area, Pick, Picker};
 use super::position;
 use super::preview::{self, Preview};
+use super::themes;
 use crate::render::engine::{Engine, Layout, Pointer, Press, Rect, Select};
 use crate::term::kitty::{self, Shm};
 use crate::term::screen;
@@ -383,7 +384,7 @@ fn start(file: PathBuf, stdin: bool, list: Option<PathBuf>) -> i32 {
         img_col: 0,
         img_cols: size.cols,
         loaded: false,
-        theme: &config::get().themes.light,
+        theme: config::get().themes.light,
         touched: false,
         late: None,
         glide: None,
@@ -619,7 +620,11 @@ impl Viewer {
                     Pick::Close if self.opened => {
                         self.listing = false;
                         self.end_preview();
-                        true
+                        if std::ptr::eq(config::theme(), self.theme) && self.app.toc_cols(self.size.cols) == self.img_col {
+                            return true;
+                        }
+                        self.rerender_keep();
+                        false
                     }
                     Pick::Close | Pick::Quit => {
                         self.quit = true;
@@ -648,6 +653,10 @@ impl Viewer {
                     }
                     Key::WheelUp(x, y) | Key::WheelDown(x, y) => {
                         let (col, row) = self.spot(x, y).cell;
+                        if self.region((col, row)) == Region::Sidebar && self.app.themes.is_some() && !self.app.help && !self.app.expanded {
+                            let actions = self.app.theme_wheel(matches!(k, Key::WheelDown(..)));
+                            return self.act_all(actions);
+                        }
                         if self.region((col, row)) == Region::Sidebar
                             && !self.app.help
                             && !self.app.expanded
@@ -798,6 +807,47 @@ impl Viewer {
                 self.edit();
                 false
             }
+            Action::OpenThemes if app::toc_width(self.size.cols) == 0 => {
+                self.notify(&format!("Too narrow for the theme list. It needs {} columns", app::TOC_MIN_COLS));
+                false
+            }
+            Action::OpenThemes => {
+                let height = self.app.toc_list_height as usize;
+                self.app.themes = Some(themes::List::new(config::choices(), config::fixed(), config::follows(), config::theme(), height));
+                self.refit();
+                false
+            }
+            Action::PreviewTheme => {
+                if let Some(list) = &self.app.themes {
+                    config::show(Some(list.choices[list.shown].theme()));
+                }
+                if std::ptr::eq(config::theme(), self.theme) {
+                    self.draw_chrome();
+                } else {
+                    self.rerender_keep();
+                }
+                false
+            }
+            Action::CloseThemes => {
+                let Some(list) = self.app.themes.take() else { return false };
+                config::show(list.before);
+                self.refit();
+                false
+            }
+            Action::DropThemes => {
+                if let Some(list) = self.app.themes.take() {
+                    config::show(list.before);
+                }
+                false
+            }
+            Action::PickTheme => {
+                let Some(list) = self.app.themes.take() else { return false };
+                config::show(Some(list.chosen().theme()));
+                let note = config::save(list.chosen()).unwrap_or_else(|e| e);
+                self.refit();
+                self.notify(&note);
+                false
+            }
             Action::Browse => {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                 let from = if self.stdin { cwd.clone() } else { self.base() };
@@ -850,6 +900,11 @@ impl Viewer {
         let rows = self.viewport_rows() as u16;
         let grid = self.grid();
         match click {
+            Click::Move if self.app.themes.is_some() && !self.app.help && !self.app.expanded && self.region(spot.cell) == Region::Sidebar => {
+                self.hover(spot);
+                let actions = self.app.theme_hover(u32::from(row) - 1);
+                self.act_all(actions)
+            }
             Click::Move => self.hover(spot),
             Click::Press => {
                 self.drag = None;
@@ -883,6 +938,10 @@ impl Viewer {
                         self.app.notice = None;
                     }
                     let actions = self.app.handle(key);
+                    return self.act_all(actions);
+                }
+                if self.app.themes.is_some() && region == Region::Sidebar {
+                    let actions = self.app.theme_click(u32::from(row) - 1);
                     return self.act_all(actions);
                 }
                 if region == Region::Sidebar
@@ -1231,6 +1290,14 @@ impl Viewer {
 
     fn live(&self) -> bool {
         !self.stdin
+    }
+
+    fn refit(&mut self) {
+        if std::ptr::eq(config::theme(), self.theme) && self.app.toc_cols(self.size.cols) == self.img_col {
+            self.draw_chrome();
+        } else {
+            self.rerender_keep();
+        }
     }
 
     fn rerender_keep(&mut self) {
@@ -1651,6 +1718,10 @@ impl Viewer {
                 self.rerender_keep();
             }
         }
+        if self.app.themes.is_some() && app::toc_width(self.size.cols) == 0 {
+            self.act(Action::CloseThemes);
+            self.notify(&format!("Too narrow for the theme list. It needs {} columns", app::TOC_MIN_COLS));
+        }
         let (poll, late) = image_wait(self.late, self.engine.pending_images(), Instant::now());
         if poll {
             // Each engine relayout gets a measure here before the next tile goes out, so tiles and offsets agree.
@@ -1821,7 +1892,7 @@ impl Viewer {
 
     /// Puts `next` in place of the page's state, keeping the settings that hold across files. Returns the old state.
     fn replace_app(&mut self, mut next: App) -> App {
-        (next.wrap, next.toc_visible) = (self.app.wrap, self.app.toc_visible);
+        (next.wrap, next.toc_visible, next.themes) = (self.app.wrap, self.app.toc_visible, self.app.themes.take());
         std::mem::replace(&mut self.app, next)
     }
 

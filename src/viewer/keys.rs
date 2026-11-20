@@ -23,7 +23,7 @@ Search
                           All lowercase ignores case. Any uppercase letter makes case count.
 
 Contents
-  t                       show or hide the contents panel
+  t, Ctrl-t               show or hide the contents panel
   1-9                     jump to the Nth section. Press again to step through its subsections
   0                       make the next repeated digit step backwards through subsections
   J K, ]] [[              go to the next, previous section
@@ -35,8 +35,9 @@ Other
   e or v                  open the file in $EDITOR (default vi), then reload it
   c                       copy the file's Markdown source to the clipboard
   ?                       show this list. Press ? or Esc to go back to the page
+  T                       pick a theme: j k to move, Space or a click to try one, Enter to save it, Esc or T to cancel. The page still works meanwhile
   Ctrl-p                  list Markdown files in this repo or folder: type to filter, Enter to open
-  Ctrl-z                  pause mddog and go back to the shell (fg to resume)
+  Ctrl-z                  pause mddog and go back to the shell (fg to resume). Works in the search prompt and help too
   q, Ctrl-c               quit mddog";
 
 #[cfg(test)]

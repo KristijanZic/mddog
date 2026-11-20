@@ -167,6 +167,11 @@ pub enum Action {
     Suspend,
     Browse,
     BackFile,
+    OpenThemes,
+    PreviewTheme,
+    PickTheme,
+    CloseThemes,
+    DropThemes,
     Quit,
 }
 
@@ -193,6 +198,7 @@ pub struct App {
     pub missing: bool,
     /// Backspace with no jump left goes back to the file opened before this one.
     pub back_file: bool,
+    pub themes: Option<super::themes::List>,
     last_query: String,
     back: Vec<u32>,
     pinned: Option<usize>,
@@ -235,6 +241,9 @@ impl App {
         self.set_headings(headings);
         self.toc_list_height = viewport.saturating_sub(TOC_HEADER).max(1);
         self.clamp_toc();
+        if let Some(l) = self.themes.as_mut() {
+            l.reveal(self.toc_list_height as usize);
+        }
     }
 
     pub fn modal_click(&mut self, press: bool, on_hint: bool) -> Option<Vec<Action>> {
@@ -408,8 +417,13 @@ impl App {
     }
 
     pub fn handle(&mut self, key: Key) -> Vec<Action> {
+        let key = if key == Key::Ctrl('t') && self.prompt.is_none() { Key::Char('t') } else { key };
         let instant = self.instant(key) || self.prompt.is_some();
+        let leave = self.themes.is_some() && self.prompt.is_none() && !self.help && !self.expanded && (key == Key::Ctrl('p') || (key == Key::Char('t') && !self.entries.is_empty()));
         let mut a = self.handle_key(key);
+        if leave {
+            a.insert(0, Action::DropThemes);
+        }
         if !instant {
             for x in &mut a {
                 if *x == Action::Scroll {
@@ -469,6 +483,7 @@ impl App {
                     draft.push(c);
                     vec![Action::Status]
                 }
+                Key::Ctrl('z') => vec![Action::Suspend],
                 Key::WheelUp(..) => self.up(WHEEL),
                 Key::WheelDown(..) => self.down(WHEEL),
                 Key::WheelLeft(..) | Key::WheelRight(..) => self.side(key),
@@ -485,6 +500,7 @@ impl App {
                 (_, Some((step, true))) => t + self.rows(step),
                 (_, Some((step, false))) => t.saturating_sub(self.rows(step)),
                 (Key::Char('q' | 'Q') | Key::Ctrl('c'), _) => return vec![Action::Quit],
+                (Key::Ctrl('z'), _) => return vec![Action::Suspend],
                 (Key::Char('?') | Key::Esc, _) => {
                     self.help = false;
                     0
@@ -494,6 +510,27 @@ impl App {
             };
             return vec![Action::Help];
         }
+        if self.themes.is_some() {
+            if !matches!(key, Key::Char('[' | ']')) {
+                self.bracket = None;
+            }
+            return match key {
+                Key::Char('j') | Key::Down => self.theme_step(true),
+                Key::Char('k') | Key::Up => self.theme_step(false),
+                Key::Char(' ') => self.theme_preview(),
+                Key::Enter => vec![Action::PickTheme],
+                Key::Esc | Key::Char('T') => vec![Action::CloseThemes],
+                Key::Char('t') if !self.entries.is_empty() => {
+                    self.toc_visible = false;
+                    self.page_key(key)
+                }
+                _ => self.page_key(key),
+            };
+        }
+        self.page_key(key)
+    }
+
+    fn page_key(&mut self, key: Key) -> Vec<Action> {
         if let Key::Char(c @ (']' | '[')) = key {
             if self.bracket.take() == Some(c) && !self.entries.is_empty() {
                 return self.cycle_root(c == ']');
@@ -537,6 +574,7 @@ impl App {
             Key::Char('c') => vec![Action::Copy],
             Key::Ctrl('z') => vec![Action::Suspend],
             Key::Ctrl('p') => vec![Action::Browse],
+            Key::Char('T') => vec![Action::OpenThemes],
             Key::Char('t') if self.entries.is_empty() => vec![Action::Notice("This file has no headings".into())],
             Key::Char('t') => {
                 self.toc_visible = !self.toc_visible;
@@ -638,6 +676,34 @@ impl App {
         a
     }
 
+    fn theme_step(&mut self, down: bool) -> Vec<Action> {
+        let height = self.toc_list_height as usize;
+        let moved = self.themes.as_mut().is_some_and(|l| l.step(down, height));
+        if moved { vec![Action::Status] } else { vec![] }
+    }
+
+    pub fn theme_hover(&mut self, line: u32) -> Vec<Action> {
+        let Some(row) = line.checked_sub(TOC_HEADER) else { return vec![] };
+        let moved = self.themes.as_mut().is_some_and(|l| l.point(row as usize));
+        if moved { vec![Action::Status] } else { vec![] }
+    }
+
+    pub fn theme_click(&mut self, line: u32) -> Vec<Action> {
+        let Some(l) = self.themes.as_mut() else { return vec![] };
+        let Some(i) = line.checked_sub(TOC_HEADER).and_then(|r| l.at(r as usize)) else { return vec![] };
+        l.sel = i;
+        self.theme_preview()
+    }
+
+    fn theme_preview(&mut self) -> Vec<Action> {
+        let changed = self.themes.as_mut().is_some_and(super::themes::List::preview);
+        if changed { vec![Action::PreviewTheme] } else { vec![Action::Status] }
+    }
+
+    pub fn theme_wheel(&mut self, down: bool) -> Vec<Action> {
+        self.theme_step(down)
+    }
+
     pub fn toc_click(&mut self, line: u32) -> Vec<Action> {
         let Some(i) = line.checked_sub(TOC_HEADER).filter(|&n| n < self.toc_list_height).map(|n| n as usize + self.toc_offset as usize).filter(|&i| i < self.entries.len()) else { return vec![] };
         let mut a = self.jump(self.entries[i].row);
@@ -725,7 +791,7 @@ impl App {
 
     /// The contents sidebar's width at `cols` columns: 0 while it is hidden or has no entries.
     pub fn toc_cols(&self, cols: u16) -> u16 {
-        if self.toc_visible && !self.entries.is_empty() { toc_width(cols) } else { 0 }
+        if (self.toc_visible && !self.entries.is_empty()) || self.themes.is_some() { toc_width(cols) } else { 0 }
     }
 
     pub fn current_entry(&self) -> Option<usize> {
@@ -767,7 +833,7 @@ impl App {
             } else {
                 s.push_str(&format!(" \"{}\" {}/{} ", self.query, self.current + 1, self.matches.len()));
             }
-        } else if let Some(e) = self.current_entry().filter(|&e| self.notice.is_none() && !self.toc_visible && self.entries[e].row <= self.scroll && self.scroll > 0) {
+        } else if let Some(e) = self.current_entry().filter(|&e| self.notice.is_none() && !self.toc_visible && self.themes.is_none() && self.entries[e].row <= self.scroll && self.scroll > 0) {
             s.push_str(&format!("› {} ", self.entries[e].title));
         }
         s
@@ -784,6 +850,9 @@ impl App {
         }
         if self.help {
             return vec![QUIT, ("?", "back to the page", Key::Char('?')), ("j/k", "scroll", Key::Char(' '))];
+        }
+        if self.themes.is_some() {
+            return vec![("Space", "preview", Key::Char(' ')), ("Enter", "save", Key::Enter), ("Esc", "cancel", Key::Esc)];
         }
         if !self.query.is_empty() && self.matches.is_empty() {
             return vec![QUIT, ("/", "search again", Key::Char('/')), ("Esc", "clear", Key::Esc)];
@@ -1396,6 +1465,67 @@ mod tests {
         assert!(!d.due(t + ms(150)));
         assert!(d.due(t + ms(220)));
         assert!(!d.due(t + ms(400)));
+    }
+
+    #[test]
+    fn ctrl_t_toggles_the_contents_and_ctrl_z_suspends_from_the_prompt_and_help() {
+        let mut a = app(100, 20);
+        a.set_headings(&[h(1, "One", 0)]);
+        assert_eq!(a.handle(Key::Ctrl('t')), vec![Action::ToggleToc]);
+        assert!(a.toc_visible);
+        a.handle(Key::Char('/'));
+        assert_eq!(a.handle(Key::Ctrl('t')), vec![]);
+        assert_eq!(a.handle(Key::Ctrl('z')), vec![Action::Suspend]);
+        a.handle(Key::Esc);
+        a.handle(Key::Char('?'));
+        assert_eq!(a.handle(Key::Ctrl('z')), vec![Action::Suspend]);
+    }
+
+    #[test]
+    fn theme_list_keys() {
+        let mut a = app(100, 20);
+        assert_eq!(a.handle(Key::Char('T')), vec![Action::OpenThemes]);
+        let dark = crate::theme::builtin("github-dark").unwrap();
+        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
+        let choices = vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }];
+        a.themes = Some(super::super::themes::List::new(choices, None, true, dark, 10));
+        assert_eq!(a.toc_cols(120), toc_width(120));
+        assert_eq!(a.handle(Key::Char('k')), vec![]);
+        assert_eq!(a.handle(Key::Char('j')), vec![Action::Status]);
+        assert_eq!(a.handle(Key::Char(' ')), vec![Action::PreviewTheme]);
+        assert_eq!(a.handle(Key::Char(' ')), vec![Action::Status]);
+        assert_eq!(a.handle(Key::Char('t')), vec![Action::Notice("This file has no headings".into())]);
+        assert_eq!(a.handle(Key::Ctrl('t')), vec![Action::Notice("This file has no headings".into())]);
+        assert!(!a.handle(Key::Char('G')).is_empty() && a.themes.is_some());
+        assert_eq!(a.handle(Key::Ctrl('p')), vec![Action::DropThemes, Action::Browse]);
+        assert_eq!(a.handle(Key::Char('q')), vec![Action::Quit]);
+        a.help = true;
+        assert_eq!(a.hints()[0], QUIT);
+        a.help = false;
+        a.set_headings(&[h(1, "One", 0), h(2, "Two", 5)]);
+        assert_eq!(keys(&mut a, &[Key::Char('['), Key::Char(' '), Key::Char('[')]), vec![Action::Status]);
+        assert_eq!(a.handle(Key::Char('t')), vec![Action::DropThemes, Action::ToggleToc]);
+        assert!(a.toc_visible);
+        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
+        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        assert_eq!(a.handle(Key::Char('t')), vec![Action::DropThemes, Action::ToggleToc]);
+        assert!(a.toc_visible, "t from the theme list hid the contents it was covering");
+        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
+        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        assert_eq!(a.handle(Key::Ctrl('t')), vec![Action::DropThemes, Action::ToggleToc]);
+        assert!(a.toc_visible, "Ctrl-t from the theme list hid the contents it was covering");
+        let follow = crate::config::Choice::Follow { value: "light:github-light,dark:github-dark".into(), light: crate::theme::builtin("github-light").unwrap(), dark };
+        a.themes = Some(super::super::themes::List::new(vec![follow, crate::config::Choice::Theme { value: "github-dark".into(), theme: dark }], None, false, dark, 10));
+        assert_eq!(a.hints().iter().map(|h| h.2).collect::<Vec<_>>(), vec![Key::Char(' '), Key::Enter, Key::Esc]);
+        assert_eq!(a.handle(Key::Enter), vec![Action::PickTheme]);
+        assert_eq!(a.handle(Key::Char('T')), vec![Action::CloseThemes]);
+        assert_eq!(a.handle(Key::Esc), vec![Action::CloseThemes]);
+        assert_eq!(a.theme_hover(TOC_HEADER), vec![Action::Status]);
+        assert_eq!(a.themes.as_ref().unwrap().sel, 0);
+        assert_eq!(a.theme_click(TOC_HEADER + 5), vec![]);
+        assert_eq!(a.theme_click(TOC_HEADER + 1), vec![Action::Status]);
+        assert_eq!(a.theme_click(TOC_HEADER), vec![Action::PreviewTheme]);
+        assert_eq!(a.themes.as_ref().unwrap().shown, 0);
     }
 
     #[test]

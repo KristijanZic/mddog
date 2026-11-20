@@ -8,6 +8,7 @@ pub mod loading;
 pub mod picker;
 pub mod position;
 pub mod preview;
+pub mod themes;
 pub mod view;
 
 use crate::term::Key;

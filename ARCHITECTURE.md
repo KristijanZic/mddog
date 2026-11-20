@@ -43,9 +43,11 @@ The command line. It parses the options, checks the file before it takes the ter
 
 ### `src/config.rs`, `src/theme.rs`
 
-`config` reads the optional `config.toml` once, at startup, into a `OnceLock`. Other code reads it with `config::get()` and `config::theme()`. An unknown key or a bad value stops the run with an error that names the file, line, and key. `config.example.toml` lists every key.
+`config` reads the optional `config.toml` once, at startup, into a `OnceLock`. Other code reads it with `config::get()` and `config::theme()`. An unknown key or a bad value stops the run with an error that names the file, line, and key. `config.example.toml` lists every key. The theme list (T) changes the theme while mddog runs: `config::show` puts a theme on screen over the config, and `config::save` writes the `theme` value back to `config.toml` and makes it the config's.
 
 `theme` reads theme files. `TOKENS` is the one list of tokens and their kinds. The built-in themes are `assets/themes/*.css`, embedded in the binary and listed in `BUILTIN`. A theme file uses CSS syntax but is not a style sheet: only `:root` rules with known tokens are allowed. A theme can name a base theme and take the tokens it leaves out from that base. `theme::Theme` holds the resolved tokens and the `Palette` for the parts drawn in terminal cells.
+
+**Architecture invariant:** each theme file is read once per run and kept for the rest of it, so a theme keeps one address. The viewer tells themes apart by address (`std::ptr::eq`), and the file list's previews key on it.
 
 **Architecture invariant:** `theme.rs` holds the only SGR color formatters. Every part drawn in cells gets its colors through `Palette`.
 
@@ -90,6 +92,7 @@ The interactive viewer and the file list.
 - `position.rs`: keeps the view on the same content when the page is laid out again.
 - `loading.rs`: the skeleton that shows while a slow file loads.
 - `picker.rs`: the file list, and how it shares the screen with the preview. `picker::listed` is the one check of `file_list.extensions`, used by the list, "Did you mean", the not-Markdown notice, and link following.
+- `themes.rs`: the theme list that T shows in the sidebar.
 - `preview.rs`: `Preview`, the file list's preview: the top screen of the selected file, drawn on a worker thread with its own `Engine` and kept off the network.
 - `link.rs` and `clipboard.rs`: following links, and copying text.
 

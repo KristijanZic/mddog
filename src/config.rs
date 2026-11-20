@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use serde::Deserialize;
 
@@ -210,22 +210,36 @@ impl TryFrom<String> for ThemeSpec {
                 theme::builtin(t).map(Source::Builtin).ok_or_else(|| format!("unknown theme {t:?}. Built-in themes: {}. A theme file's path ends in .css", theme::names()))
             }
         };
-        let pair = s.split(',').map(|p| p.trim().split_once(':')).collect::<Option<Vec<_>>>();
-        match pair.as_deref() {
-            Some([("light", l), ("dark", d)] | [("dark", d), ("light", l)]) => Ok(ThemeSpec::Pair { light: source(l)?, dark: source(d)? }),
-            _ if s.contains(',') || s.starts_with("light:") || s.starts_with("dark:") => Err(format!("expected one theme, or \"light:THEME,dark:THEME\", but got {s:?}")),
-            _ => Ok(ThemeSpec::One(source(&s)?)),
+        match slots(&s) {
+            Some((l, d)) => Ok(ThemeSpec::Pair { light: source(l)?, dark: source(d)? }),
+            None if s.contains(',') || s.starts_with("light:") || s.starts_with("dark:") => Err(format!("expected one theme, or \"light:THEME,dark:THEME\", but got {s:?}")),
+            None => Ok(ThemeSpec::One(source(&s)?)),
         }
     }
 }
 
+fn slots(s: &str) -> Option<(&str, &str)> {
+    let pair = s.split(',').map(|p| p.trim().split_once(':')).collect::<Option<Vec<_>>>()?;
+    match pair.as_slice() {
+        [("light", l), ("dark", d)] | [("dark", d), ("light", l)] => Some((l.trim(), d.trim())),
+        _ => None,
+    }
+}
+
 impl ThemeSpec {
+    fn sources(&self) -> Vec<&Source> {
+        match self {
+            ThemeSpec::One(s) => vec![s],
+            ThemeSpec::Pair { light, dark } => vec![light, dark],
+        }
+    }
+
     /// Reads the theme files. A relative path is relative to `dir`, the config folder.
     fn load(&self, dir: &Path) -> Result<Themes, String> {
-        let read = |s: &Source| -> Result<Theme, String> {
+        let read = |s: &Source| -> Result<&'static Theme, String> {
             match s {
-                Source::Builtin(t) => Ok((*t).clone()),
-                Source::File(f) => theme::file(&theme::resolve(dir, f)),
+                Source::Builtin(t) => Ok(t),
+                Source::File(f) => theme_file(&theme::resolve(dir, f)),
             }
         };
         Ok(match self {
@@ -238,8 +252,19 @@ impl ThemeSpec {
 /// The themes in use: `dark` is set when the theme follows the macOS appearance.
 #[derive(Debug, PartialEq)]
 pub struct Themes {
-    pub light: Theme,
-    pub dark: Option<Theme>,
+    pub light: &'static Theme,
+    pub dark: Option<&'static Theme>,
+}
+
+fn theme_file(path: &Path) -> Result<&'static Theme, String> {
+    static FILES: Mutex<Vec<(PathBuf, &'static Theme)>> = Mutex::new(Vec::new());
+    let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    if let Some((_, t)) = FILES.lock().unwrap_or_else(PoisonError::into_inner).iter().find(|(k, _)| *k == key) {
+        return Ok(t);
+    }
+    let t: &'static Theme = Box::leak(Box::new(theme::file(path)?));
+    FILES.lock().unwrap_or_else(PoisonError::into_inner).push((key, t));
+    Ok(t)
 }
 
 impl Default for Themes {
@@ -249,6 +274,7 @@ impl Default for Themes {
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
+static DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn get() -> &'static Config {
     CONFIG.get_or_init(Config::default)
@@ -261,7 +287,11 @@ pub fn dir() -> Option<PathBuf> {
 
 pub fn load() -> Result<(), String> {
     let config = match dir() {
-        Some(d) => read(&d)?,
+        Some(d) => {
+            let config = read(&d)?;
+            let _ = DIR.set(d);
+            config
+        }
         None => Config::default(),
     };
     let _ = CONFIG.set(config);
@@ -310,12 +340,223 @@ fn key_at(text: &str, at: usize) -> Option<String> {
     Some(table.map_or_else(|| key.to_string(), |t| format!("{t}.{key}")))
 }
 
-/// The theme to draw with now: the one theme, or the one for the macOS appearance.
+struct Shown {
+    light: &'static Theme,
+    dark: Option<&'static Theme>,
+    fixed: Option<&'static Theme>,
+}
+
+fn shown() -> MutexGuard<'static, Shown> {
+    static SHOWN: LazyLock<Mutex<Shown>> = LazyLock::new(|| {
+        let t = &get().themes;
+        Mutex::new(Shown { light: t.light, dark: t.dark, fixed: None })
+    });
+    SHOWN.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 pub fn theme() -> &'static Theme {
-    let t = &get().themes;
-    match &t.dark {
-        Some(dark) if system_dark() => dark,
-        _ => &t.light,
+    let (light, dark, fixed) = {
+        let s = shown();
+        (s.light, s.dark, s.fixed)
+    };
+    match (fixed, dark) {
+        (Some(t), _) => t,
+        (None, Some(dark)) if system_dark() => dark,
+        _ => light,
+    }
+}
+
+pub fn fixed() -> Option<&'static Theme> {
+    shown().fixed
+}
+
+pub fn show(t: Option<&'static Theme>) {
+    shown().fixed = t;
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Choice {
+    Follow { value: String, light: &'static Theme, dark: &'static Theme },
+    Theme { value: String, theme: &'static Theme },
+}
+
+impl Choice {
+    pub fn label(&self) -> &str {
+        match self {
+            Choice::Follow { .. } => "Follow macOS",
+            Choice::Theme { value, .. } => value,
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        match self {
+            Choice::Follow { value, .. } | Choice::Theme { value, .. } => value,
+        }
+    }
+
+    pub fn theme(&self) -> &'static Theme {
+        match self {
+            Choice::Follow { dark, .. } if system_dark() => dark,
+            Choice::Follow { light, .. } => light,
+            Choice::Theme { theme, .. } => theme,
+        }
+    }
+}
+
+pub fn follows() -> bool {
+    let s = shown();
+    s.dark.is_some() && s.fixed.is_none()
+}
+
+pub fn choices() -> Vec<Choice> {
+    let mut out = Vec::new();
+    if let (ThemeSpec::Pair { light, dark }, Some(d)) = (&get().theme, get().themes.dark) {
+        let name = |s: &Source| match s {
+            Source::Builtin(t) => t.name.clone(),
+            Source::File(f) => f.clone(),
+        };
+        out.push(Choice::Follow { value: format!("light:{},dark:{}", name(light), name(dark)), light: get().themes.light, dark: d });
+    }
+    out.extend(theme::builtin_names().filter_map(|n| Some(Choice::Theme { value: n.to_string(), theme: theme::builtin(n)? })));
+    let dir = DIR.get().map_or(Path::new(""), PathBuf::as_path);
+    let mut values: Vec<String> = get()
+        .theme
+        .sources()
+        .into_iter()
+        .filter_map(|s| match s {
+            Source::File(f) => Some(f.clone()),
+            Source::Builtin(_) => None,
+        })
+        .collect();
+    if DIR.get().is_some() {
+        values.extend(css_in(dir, ""));
+        values.extend(css_in(&dir.join("themes"), "themes/"));
+    }
+    let mut seen = Vec::new();
+    for v in values {
+        let path = theme::resolve(dir, &v);
+        let key = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        if let Ok(theme) = theme_file(&path) {
+            out.push(Choice::Theme { value: v, theme });
+        }
+    }
+    out
+}
+
+fn css_in(dir: &Path, prefix: &str) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|n| n.ends_with(".css") && n.trim() == n)
+        .map(|n| format!("{prefix}{n}"))
+        .filter(|v| matches!(ThemeSpec::try_from(v.clone()), Ok(ThemeSpec::One(_))))
+        .collect();
+    names.sort();
+    names.truncate(100);
+    names
+}
+
+pub fn save(choice: &Choice) -> Result<String, String> {
+    let value = choice.value();
+    let spec = ThemeSpec::try_from(value.to_string()).map_err(|e| format!("Can't save the theme: {e}"))?;
+    let themes = spec.load(DIR.get().map_or(Path::new(""), PathBuf::as_path)).map_err(|e| format!("Can't save the theme: {e}"))?;
+    *shown() = Shown { light: themes.light, dark: themes.dark, fixed: None };
+    let dir = DIR.get().ok_or("Can't save the theme: HOME is not set")?;
+    for s in spec.sources() {
+        if let Source::File(f) = s {
+            theme::file(&theme::resolve(dir, f)).map_err(|e| format!("Can't save the theme: {e}"))?;
+        }
+    }
+    let path = dir.join("config.toml");
+    let _lock = std::fs::create_dir_all(dir)
+        .and_then(|()| std::fs::File::open(dir))
+        .and_then(|f| f.lock().map(|()| f))
+        .map_err(|e| format!("Can't save the theme in {}: {}", tilde(&path), crate::term::io_error(&e)))?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("Can't read {}: {}", tilde(&path), crate::term::io_error(&e))),
+    };
+    let new = set_theme(&text, value).map_err(|e| format!("Can't save the theme in {}: {e}", tilde(&path)))?;
+    if new != text {
+        replace(&path, &text, &new).map_err(|e| format!("Can't write {}: {}", tilde(&path), crate::term::io_error(&e)))?;
+    }
+    Ok(match choice {
+        Choice::Follow { .. } => format!("Saved: follow the macOS appearance, in {}", tilde(&path)),
+        Choice::Theme { .. } => format!("Saved {value} as the theme in {}", tilde(&path)),
+    })
+}
+
+fn follow(path: &Path) -> PathBuf {
+    let mut target = path.to_path_buf();
+    for _ in 0..40 {
+        let Ok(link) = std::fs::read_link(&target) else { break };
+        target = target.parent().map_or_else(|| link.clone(), |p| p.join(&link));
+    }
+    target
+}
+
+fn replace(path: &Path, old: &str, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let target = follow(path);
+    let name = target.file_name().map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
+    let tmp = target.with_file_name(format!(".{name}.{}", crate::tmp::nonce()));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut write = || {
+        if std::fs::metadata(&target).is_ok() {
+            std::fs::copy(&target, &tmp)?;
+            f.set_len(0)?;
+        }
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        let now = match std::fs::read_to_string(&target) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            r => r?,
+        };
+        if now != old || follow(path) != target {
+            return Err(std::io::Error::other("it changed while saving. Try again"));
+        }
+        std::fs::rename(&tmp, &target)
+    };
+    write().inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })
+}
+
+fn set_theme(text: &str, value: &str) -> Result<String, String> {
+    let table = toml::de::DeTable::parse(text).map_err(|e| e.message().trim().to_string())?;
+    let found = table.get_ref().iter().find(|(k, _)| k.get_ref() == "theme").map(|(_, v)| v);
+    let Some(v) = found else {
+        let (bom, rest) = text.strip_prefix('\u{feff}').map_or(("", text), |r| ("\u{feff}", r));
+        return Ok(format!("{bom}theme = {}\n{rest}", quote(value)));
+    };
+    match v.get_ref() {
+        toml::de::DeValue::String(cur) if cur == value || ThemeSpec::try_from(cur.to_string()).is_ok_and(|c| ThemeSpec::try_from(value.to_string()).is_ok_and(|v| c == v)) => {
+            return Ok(text.to_string());
+        }
+        toml::de::DeValue::String(_) => {}
+        _ => return Err("theme is not a string".into()),
+    }
+    let span = v.span();
+    Ok(format!("{}{}{}", &text[..span.start], quote(value), &text[span.end..]))
+}
+
+fn quote(s: &str) -> String {
+    toml::Value::String(s.to_string()).to_string()
+}
+
+fn tilde(path: &Path) -> String {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match home.as_deref().and_then(|h| path.strip_prefix(h).ok()) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -471,6 +712,75 @@ mod tests {
         assert!(e.starts_with("line 1: theme: expected one theme, or \"light:THEME,dark:THEME\""), "{e}");
         let e = one_line("copy_on_select = false\ntheme = \"light:github-light,dark:missing.css\"\n");
         assert!(e.starts_with("line 2: theme: /nonexistent/missing.css: "), "{e}");
+    }
+
+    #[test]
+    fn set_theme_keeps_the_rest() {
+        let text = "# my config\ntheme = \"github-dark\" # night\ncopy_on_select = true\n";
+        assert_eq!(set_theme(text, "obsidian-light").unwrap(), "# my config\ntheme = \"obsidian-light\" # night\ncopy_on_select = true\n");
+        assert_eq!(set_theme("theme = 'light:github-light, dark:mine.css'\n", "themes/c.css").unwrap(), "theme = \"themes/c.css\"\n");
+        let t = set_theme("copy_on_select = true\n\n[file_list.preview]\nsize = 50\n", "github-dark").unwrap();
+        assert_eq!(t, "theme = \"github-dark\"\ncopy_on_select = true\n\n[file_list.preview]\nsize = 50\n");
+        assert_eq!(set_theme("", "github-dark").unwrap(), "theme = \"github-dark\"\n");
+        assert_eq!(set_theme("theme = 'github-dark'\n", "github-dark").unwrap(), "theme = 'github-dark'\n");
+        let pair = "theme = \"dark:github-dark, light:github-light\"\n";
+        assert_eq!(set_theme(pair, "light:github-light,dark:github-dark").unwrap(), pair);
+        assert_eq!(set_theme("\u{feff}copy_on_select = true\n", "github-dark").unwrap(), "\u{feff}theme = \"github-dark\"\ncopy_on_select = true\n");
+        assert_eq!(set_theme("\u{feff}theme = \"a.css\"\n", "github-dark").unwrap(), "\u{feff}theme = \"github-dark\"\n");
+        assert_eq!(set_theme("theme = 3\n", "github-dark").unwrap_err(), "theme is not a string");
+        assert!(set_theme("theme = \"x\n", "github-dark").is_err());
+        assert_eq!(quote("C:\\a \"b\".css"), "'C:\\a \"b\".css'");
+    }
+
+    #[test]
+    fn replace_writes_through_a_symlink() {
+        let dir = std::env::temp_dir().join(format!("mddog-replace-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        std::fs::write(dir.join("real/config.toml"), "old").unwrap();
+        std::os::unix::fs::symlink(dir.join("real/config.toml"), dir.join("config.toml")).unwrap();
+        replace(&dir.join("config.toml"), "old", "new").unwrap();
+        assert!(std::fs::symlink_metadata(dir.join("config.toml")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(dir.join("real/config.toml")).unwrap(), "new");
+        assert_eq!(std::fs::read_dir(dir.join("real")).unwrap().count(), 1);
+        std::os::unix::fs::symlink(dir.join("real/later.toml"), dir.join("dangling.toml")).unwrap();
+        replace(&dir.join("dangling.toml"), "", "made").unwrap();
+        assert!(std::fs::symlink_metadata(dir.join("dangling.toml")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(dir.join("real/later.toml")).unwrap(), "made");
+        assert!(replace(&dir.join("config.toml"), "stale", "lost").is_err());
+        std::fs::set_permissions(dir.join("real/config.toml"), std::os::unix::fs::PermissionsExt::from_mode(0o640)).unwrap();
+        assert!(std::process::Command::new("xattr").args(["-w", "mddog.test", "kept"]).arg(dir.join("real/config.toml")).status().unwrap().success());
+        replace(&dir.join("config.toml"), "new", "newer").unwrap();
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(dir.join("real/config.toml")).unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o640);
+        let out = std::process::Command::new("xattr").args(["-p", "mddog.test"]).arg(dir.join("real/config.toml")).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "kept");
+        let decoy = dir.join("decoy");
+        std::fs::write(&decoy, "keep").unwrap();
+        let nonce = crate::tmp::nonce();
+        std::os::unix::fs::symlink(&decoy, dir.join(format!("real/.config.toml.{nonce}"))).unwrap();
+        assert!(replace(&dir.join("config.toml"), "newer", "evil").is_err());
+        assert_eq!(std::fs::read_to_string(&decoy).unwrap(), "keep");
+        std::fs::remove_file(dir.join(format!("real/.config.toml.{nonce}"))).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("real/config.toml")).unwrap(), "newer");
+        assert_eq!(std::fs::read_dir(dir.join("real")).unwrap().count(), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn css_in_lists_names_a_theme_can_have() {
+        let dir = std::env::temp_dir().join(format!("mddog-css-in-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub.css")).unwrap();
+        std::fs::write(dir.join("b.css"), ":root{}").unwrap();
+        std::fs::write(dir.join("a.css"), ":root{}").unwrap();
+        std::fs::write(dir.join("notes.txt"), "").unwrap();
+        std::fs::write(dir.join("light:c.css"), ":root{}").unwrap();
+        std::fs::write(dir.join("d,e.css"), ":root{}").unwrap();
+        std::fs::write(dir.join(" f.css"), ":root{}").unwrap();
+        assert_eq!(css_in(&dir, ""), ["a.css", "b.css", "sub.css"]);
+        let held = std::fs::File::open(&dir).unwrap();
+        held.lock().unwrap();
+        assert!(std::fs::File::open(&dir).unwrap().try_lock().is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

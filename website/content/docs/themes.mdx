@@ -22,7 +22,20 @@ To pick a theme, set [`theme`](/docs/config#theme) in your config:
 theme = "light:obsidian-light,dark:obsidian-dark"
 ```
 
-## Custom themes
+## Previewing themes
+
+Inside mddog, press `T` to list and select the available themes. This list includes both the built-in and your custom themes.
+
+To navigate this list, press:
+
+- `j` `k`, the arrows, or the pointer to move through the list
+- `Space` or a click on a theme to preview it on the page
+- `Enter` to save the highlighted theme as your default
+- `Esc` or `T` to go back to the theme you had
+
+While the list is open, the page still works: scroll it, select text and follow links to see how the theme looks.
+
+## Creating a custom theme
 
 A theme is a CSS file of tokens that sets the page's colors and type, and mddog's terminal parts (file list, status bar, table of contents, help, loading skeleton) to match. Example:
 
@@ -49,6 +62,7 @@ theme = "my-theme.css"
 - `color-scheme` is `light` or `dark`. It is required unless the theme has a [base](#build-on-another-theme)
 - Colors are literal `#rgb` or `#rrggbb`. `var()`, `rgb()`, names, and alpha are not accepted
 - A token you leave out comes from the base, else from the GitHub theme of the same mode
+- A theme file is at most 64 KiB, with at most 16 themes in its chain of bases
 - mddog reads the theme at startup. Restart it to see a change
 
 ### Build on another theme

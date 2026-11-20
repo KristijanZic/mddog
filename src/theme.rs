@@ -214,8 +214,15 @@ pub fn builtin(name: &str) -> Option<&'static Theme> {
     ALL.iter().find(|t| t.name == name)
 }
 
+const MAX_FILE: u64 = 64 * 1024;
+const MAX_CHAIN: usize = 16;
+
+pub fn builtin_names() -> impl Iterator<Item = &'static str> {
+    BUILTIN.iter().map(|(n, _)| *n)
+}
+
 pub fn names() -> String {
-    BUILTIN.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", ")
+    builtin_names().collect::<Vec<_>>().join(", ")
 }
 
 /// Whether a theme name is a file's path rather than a built-in's name.
@@ -236,13 +243,32 @@ pub fn file(path: &Path) -> Result<Theme, String> {
     load(path, &mut Vec::new())
 }
 
+fn read_small(path: &Path) -> Result<String, String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let io = |e: std::io::Error| crate::term::io_error(&e);
+    let f = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NONBLOCK).open(path).map_err(io)?;
+    if !f.metadata().map_err(io)?.is_file() {
+        return Err("not a file".into());
+    }
+    let mut bytes = Vec::new();
+    f.take(MAX_FILE + 1).read_to_end(&mut bytes).map_err(io)?;
+    if bytes.len() as u64 > MAX_FILE {
+        return Err(format!("over {} KiB, too big for a theme", MAX_FILE / 1024));
+    }
+    String::from_utf8(bytes).map_err(|_| "not UTF-8 text".into())
+}
+
 fn load(path: &Path, seen: &mut Vec<PathBuf>) -> Result<Theme, String> {
     let shown = path.display().to_string();
     let key = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     if seen.contains(&key) {
         return Err(format!("the chain of base themes loops back to {}", key.display()));
     }
-    let css = std::fs::read_to_string(path).map_err(|e| format!("{shown}: {}", crate::term::io_error(&e)))?;
+    if seen.len() >= MAX_CHAIN {
+        return Err(format!("the chain of base themes is longer than {MAX_CHAIN}"));
+    }
+    let css = read_small(path).map_err(|e| format!("{shown}: {e}"))?;
     let dir = path.parent().unwrap_or(Path::new(""));
     seen.push(key);
     read(&shown, &css, &|dark| github(dark).tokens.clone(), &mut |f| load(&resolve(dir, f), seen))
@@ -508,6 +534,28 @@ mod tests {
         let e = file(&dir.join("a.css")).unwrap_err();
         let (a, b) = (dir.join("a.css").display().to_string(), dir.join("sub/b.css").display().to_string());
         assert_eq!(e, format!("{a}: --mddog-base: {b}: --mddog-base: the chain of base themes loops back to {}", dir.join("a.css").canonicalize().unwrap().display()));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn theme_files_must_be_small_files() {
+        let dir = std::env::temp_dir().join(format!("mddog-theme-size-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("d.css")).unwrap();
+        std::fs::write(dir.join("big.css"), vec![b' '; 64 * 1024 + 1]).unwrap();
+        std::fs::write(dir.join("cut.css"), [vec![b' '; 64 * 1024 - 1], "é".as_bytes().to_vec()].concat()).unwrap();
+        assert!(file(&dir.join("cut.css")).unwrap_err().ends_with("over 64 KiB, too big for a theme"));
+        std::fs::write(dir.join("base.css"), ":root{--mddog-base:big.css}").unwrap();
+        assert_eq!(file(&dir.join("d.css")).unwrap_err(), format!("{}: not a file", dir.join("d.css").display()));
+        assert!(file(&dir.join("base.css")).unwrap_err().ends_with("big.css: over 64 KiB, too big for a theme"));
+        for i in 0..20 {
+            std::fs::write(dir.join(format!("c{i}.css")), format!(":root{{--mddog-base:c{}.css}}", i + 1)).unwrap();
+        }
+        std::fs::write(dir.join("c20.css"), ":root{color-scheme:dark}").unwrap();
+        assert!(file(&dir.join("c0.css")).unwrap_err().ends_with("the chain of base themes is longer than 16"));
+        assert!(file(&dir.join("c5.css")).is_ok());
+        let fifo = dir.join("fifo.css");
+        assert!(std::process::Command::new("mkfifo").arg(&fifo).status().unwrap().success());
+        assert_eq!(file(&fifo).unwrap_err(), format!("{}: not a file", fifo.display()));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

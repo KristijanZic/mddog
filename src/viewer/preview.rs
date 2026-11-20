@@ -33,7 +33,7 @@ pub struct Key {
     pub max_width: u32,
     pub height: u32,
     pub cell_h: u32,
-    /// By address: `config::theme()` hands out one of two static themes.
+    /// By address: each theme is read once per run.
     pub theme: usize,
 }
 

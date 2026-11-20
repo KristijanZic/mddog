@@ -562,6 +562,30 @@ fn a_pane_without_pixels_at_launch_is_no_font_zoom() {
 }
 
 #[test]
+fn the_file_list_from_the_theme_list_gives_the_page_back_its_width() {
+    let dir = scratch("theme-list-file-list");
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("XDG_CONFIG_HOME", dir.to_str().unwrap())];
+    let Viewer { mut child, mut tty, out } = open(GFM, 100, &env);
+    wait_for(&out, 0, b"a=p,");
+    let full = page_after(&trace, "terminal probed");
+    tty.write_all(b"T").unwrap();
+    wait_trace(&trace, "key Char('T')");
+    let beside = page_after(&trace, "key Char('T')");
+    tty.write_all(b"\x10").unwrap();
+    wait_trace(&trace, "list drawn");
+    tty.write_all(b"\x1b").unwrap();
+    wait_trace(&trace, "key Esc");
+    let back = page_after(&trace, "key Esc");
+    tty.write_all(b"q").unwrap();
+    let _ = exits_within(&mut child, LIMIT);
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(beside.1 < full.1, "the theme list didn't take its column: {beside:?} vs {full:?}");
+    assert_eq!(back, full, "the page kept the theme list's column after the file list closed");
+}
+
+#[test]
 fn hints_work_while_help_shows() {
     let Viewer { mut child, mut tty, out } = open(GFM, 100, &[]);
     wait_for(&out, 0, b"a=p,");

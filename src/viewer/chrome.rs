@@ -1,5 +1,6 @@
 use super::app::{self, App, Hint};
 use super::keys;
+use super::themes;
 use crate::term::{self, Key};
 use crate::theme::{Palette, bg, fg};
 
@@ -73,6 +74,10 @@ impl Chrome<'_> {
     }
 
     fn sidebar(&self, out: &mut String) {
+        if let Some(list) = &self.app.themes {
+            self.theme_list(list, out);
+            return;
+        }
         let w = usize::from(self.img_col);
         let thumb = self.app.toc_thumb().map(|(top, len)| {
             let top = (app::TOC_HEADER + top) as usize;
@@ -117,6 +122,35 @@ impl Chrome<'_> {
                 Some(_) => format!("{line}▕ ▏"),
             };
             out.push_str(&format!("\x1b[{};1H{reset}{style}{text}{}{reset}{edge}{reset}", r + 1, " ".repeat(pad)));
+        }
+    }
+
+    fn theme_list(&self, list: &themes::List, out: &mut String) {
+        let content = usize::from(self.img_col).saturating_sub(1);
+        let p = &self.palette;
+        let reset = p.reset();
+        for r in 0..view_rows(self.rows) {
+            let i = r.checked_sub(app::TOC_HEADER as usize).map(|n| n + list.offset).filter(|&i| i < list.choices.len());
+            let (text, style) = match (r, i) {
+                (1, _) => (" THEMES".to_string(), format!("\x1b[1m{}", fg(p.fg_bright))),
+                (2, _) => ("─".repeat(content), fg(p.border)),
+                (_, Some(i)) => {
+                    let mark = if i == list.current { "•" } else { " " };
+                    let label = format!(" {mark} {}", term::printable(list.choices[i].label()));
+                    let max = content.saturating_sub(1);
+                    let label = if term::width(&label) > max { term::fit(&label, max.saturating_sub(1)).0 + "…" } else { label };
+                    let style = match (i == list.sel, i == list.shown) {
+                        (true, shown) => format!("{}{}{}", if shown { "\x1b[1m" } else { "" }, bg(p.selection_bg), fg(p.fg_bright)),
+                        (false, true) => format!("\x1b[1m{}", fg(p.fg_bright)),
+                        (false, false) => fg(p.fg_muted),
+                    };
+                    (label, style)
+                }
+                _ => (String::new(), String::new()),
+            };
+            let pad = content.saturating_sub(term::width(&text));
+            let edge = if r == 2 { "┤" } else { "│" };
+            out.push_str(&format!("\x1b[{};1H{reset}{style}{text}{}{reset}{}{edge}{reset}", r + 1, " ".repeat(pad), fg(p.border)));
         }
     }
 }
