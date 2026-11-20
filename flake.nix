@@ -2,29 +2,42 @@
   description = "Render Markdown in the terminal as a browser shows them, styled like GitHub by default";
 
   inputs = {
-    # 26.05 is the latest branch supporting both aarch64-darwin and x86_64-darwin
-    # (nixpkgs-unstable / 26.11 dropped x86_64-darwin).
-    # On aarch64-darwin, consumers can set `inputs.nixpkgs.follows = "nixpkgs"` to use latest nixpkgs.
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # nixpkgs-unstable (26.11) dropped x86_64-darwin; 26.05 is the last branch
+    # supporting Intel Macs so we pin to that.
+    nixpkgs-26_05-darwin.url = "github:NixOS/nixpkgs/nixpkgs-26.05-darwin";
   };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      nixpkgs-26_05-darwin,
+    }:
     let
+      inherit (nixpkgs) lib;
       systems = [
         "aarch64-darwin"
         "x86_64-darwin"
       ];
-      forAllSystems = nixpkgs.lib.genAttrs systems;
+
+      mkPkgs =
+        system:
+        import (if system == "x86_64-darwin" then nixpkgs-26_05-darwin else nixpkgs) {
+          inherit system;
+          config = {
+            allowUnfree = true;
+            allowBroken = system == "x86_64-darwin";
+          };
+        };
+
+      forAllSystems = f: lib.genAttrs systems (system: f (mkPkgs system) system);
+
       cargoToml = fromTOML (builtins.readFile ./Cargo.toml);
     in
     {
       packages = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
+        pkgs: system: {
           mddog = pkgs.rustPlatform.buildRustPackage {
             pname = cargoToml.package.name;
             version = cargoToml.package.version;
@@ -58,11 +71,7 @@
       );
 
       devShells = forAllSystems (
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        {
+        pkgs: system: {
           default = pkgs.mkShell {
             inputsFrom = [ self.packages.${system}.mddog ];
             packages = with pkgs; [

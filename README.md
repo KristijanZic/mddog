@@ -55,7 +55,7 @@ Or add it declaratively to your system `flake.nix` inputs:
 ```nix
 inputs.mddog = {
   url = "github:qu8n/mddog";
-  # Optional on Apple Silicon: follow your own nixpkgs input
+  # Optional: reuse your own nixpkgs input (used on Apple Silicon)
   # inputs.nixpkgs.follows = "nixpkgs";
 };
 ```
