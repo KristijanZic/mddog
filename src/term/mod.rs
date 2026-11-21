@@ -41,6 +41,10 @@ impl Size {
         self.xpix == 0 || self.ypix == 0 || (rex && *self == Size { cols: 80, rows: 24, xpix: 640, ypix: 384 })
     }
 
+    pub fn stand_in(&self, rex: bool) -> bool {
+        self.unknown(rex) || (rex && u32::from(self.xpix) == u32::from(self.cols) * 8 && u32::from(self.ypix) == u32::from(self.rows) * 16)
+    }
+
     /// The cell, with the window's pixel size taken as `unit` device pixels each.
     fn cell_px_in(self, unit: f64) -> Option<(u32, u32)> {
         let (cols, rows) = (u32::from(self.cols), u32::from(self.rows));
@@ -930,6 +934,8 @@ mod tests {
         assert!(placeholder.unknown(true) && !placeholder.unknown(false));
         assert!(Size { cols: 80, rows: 24, xpix: 0, ypix: 0 }.unknown(false));
         assert!(!Size { cols: 100, rows: 40, xpix: 1800, ypix: 1520 }.unknown(true));
+        let forced = Size { cols: 140, rows: 40, xpix: 1120, ypix: 640 };
+        assert!(!forced.unknown(true) && forced.stand_in(true) && !forced.stand_in(false));
     }
 
     #[test]

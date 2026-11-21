@@ -543,6 +543,23 @@ fn a_rex_placeholder_size_at_launch_is_no_font_zoom() {
 }
 
 #[test]
+fn a_rex_size_forced_before_launch_is_no_font_zoom() {
+    let dir = scratch("rex-forced");
+    let trace = dir.join("trace.log");
+    let env = [("MDDOG_TRACE", trace.to_str().unwrap()), ("MDDOG_SCALE", "2"), ("XDG_CONFIG_HOME", dir.to_str().unwrap()), ("TERM_PROGRAM", "rex")];
+    let size = libc::winsize { ws_row: 40, ws_col: 140, ws_xpixel: 140 * 8, ws_ypixel: 40 * 16 };
+    let Viewer { mut child, tty, out } = start_sized(env!("CARGO_BIN_EXE_mdd").as_ref(), &[GFM], None, size, probe_reply((8, 16)), &env, false);
+    let drawn = wait_for(&out, 0, b"a=p,");
+    resize(&tty, libc::winsize { ws_row: 40, ws_col: 100, ws_xpixel: 100 * 18, ws_ypixel: 40 * 38 });
+    wait_trace(&trace, "mark resize");
+    wait_for(&out, drawn, b"a=p,");
+    let shown = page_after(&trace, "mark resize");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(shown, (2.0, 900.0), "the first real size was taken as a font zoom");
+}
+
+#[test]
 fn a_pane_without_pixels_at_launch_is_no_font_zoom() {
     // Rex starts a block it opens from the CLI at 80x24, with no pixel size and an 8x16 cell, until a window
     // shows it. The real cells that come then are the pane's size, not a font zoom.

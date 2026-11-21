@@ -113,9 +113,12 @@ fn settling(born: Instant, sent: Option<Instant>, now: Instant) -> bool {
 }
 
 /// The size the font zoom counts from. A start with no pixels, Rex's stand-in for an unshown block (80x24 cells of
-/// 8x16 px), or an `early` one gives way to the new size, or else the real cell reads as a zoom.
-fn zoom_start_at(start: Size, size: Size, rex: bool, early: bool) -> Size {
-    if (early || start.unknown(rex)) && !size.unknown(rex) { size } else { start }
+/// 8x16 px), or an `early` one gives way to the new size, or else the real cell reads as a zoom. Rex keeps the 8x16 px
+/// cell at any size a `resize` call forces on an unshown block. Past 1x, `hidpi`, a real cell is far bigger than that,
+/// so there any 8x16 px size counts as Rex's stand-in. At 1x it can be a real font, so only the 80x24 one does.
+fn zoom_start_at(start: Size, size: Size, rex: bool, hidpi: bool, early: bool) -> Size {
+    let stand_in = |s: Size| s.unknown(rex) || (hidpi && s.stand_in(rex));
+    if (early || stand_in(start)) && !stand_in(size) { size } else { start }
 }
 
 /// Snapshots `height` device pixels from `top`.
@@ -1381,7 +1384,7 @@ impl Viewer {
     fn take_size(&mut self) {
         self.size = self.tty.size();
         let early = settling(self.born, self.resize_sent.take(), Instant::now());
-        self.start = zoom_start_at(self.start, self.size, self.probe.rex(), early);
+        self.start = zoom_start_at(self.start, self.size, self.probe.rex(), self.display > 1.0, early);
         (self.cell_w, self.cell_h) = self.probe.cell_px(self.size, self.display);
         let base = self.probe.cell_px(self.start, self.display).1;
         self.scale = page_scale(self.display, self.cell_h, base);
@@ -2093,12 +2096,19 @@ mod tests {
         let sz = |cols, rows, xpix, ypix| Size { cols, rows, xpix, ypix };
         let (stand_in, real) = (sz(80, 24, 640, 384), sz(68, 53, 1156, 1802));
         // Rex's stand-in for an unshown block.
-        assert_eq!(zoom_start_at(stand_in, real, true, false), real);
-        assert_eq!(zoom_start_at(stand_in, stand_in, true, false), stand_in);
-        assert_eq!(zoom_start_at(sz(80, 24, 0, 0), real, false, false), real);
+        assert_eq!(zoom_start_at(stand_in, real, true, true, false), real);
+        assert_eq!(zoom_start_at(stand_in, stand_in, true, true, false), stand_in);
+        assert_eq!(zoom_start_at(sz(80, 24, 0, 0), real, false, true, false), real);
         // Outside Rex, 8x16 px cells can be real.
-        assert_eq!(zoom_start_at(real, sz(68, 53, 1360, 2120), true, false), real);
-        assert_eq!(zoom_start_at(stand_in, real, false, false), stand_in);
+        assert_eq!(zoom_start_at(real, sz(68, 53, 1360, 2120), true, true, false), real);
+        assert_eq!(zoom_start_at(stand_in, real, false, true, false), stand_in);
+        let forced = sz(140, 40, 1120, 640);
+        assert_eq!(zoom_start_at(stand_in, forced, true, true, false), stand_in);
+        assert_eq!(zoom_start_at(forced, real, true, true, false), real);
+        assert_eq!(zoom_start_at(real, forced, true, true, false), real);
+        let zoomed = sz(140, 40, 1260, 720);
+        assert_eq!(zoom_start_at(stand_in, forced, true, false, false), forced);
+        assert_eq!(zoom_start_at(forced, zoomed, true, false, false), forced);
     }
 
     #[test]
@@ -2115,9 +2125,9 @@ mod tests {
         let sz = |cols, rows, xpix, ypix| Size { cols, rows, xpix, ypix };
         // WezTerm moving from 1x to 2x pixels right after it opens.
         let (one_x, two_x) = (sz(170, 48, 1190, 768), sz(170, 48, 2380, 1536));
-        assert_eq!(zoom_start_at(one_x, two_x, false, true), two_x);
+        assert_eq!(zoom_start_at(one_x, two_x, false, true, true), two_x);
         // Later, it's a font zoom: WezTerm keeps the grid and grows the window.
-        assert_eq!(zoom_start_at(one_x, two_x, false, false), one_x);
+        assert_eq!(zoom_start_at(one_x, two_x, false, true, false), one_x);
     }
 
     #[test]
