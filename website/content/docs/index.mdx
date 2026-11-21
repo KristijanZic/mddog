@@ -38,6 +38,30 @@ To update, run `brew upgrade mddog`. If you use the [Claude Code plugin](/docs/c
 </details>
 
 <details>
+  <summary>Install with Nix</summary>
+
+  ```sh
+  nix profile add github:qu8n/mddog   # install
+  nix run github:qu8n/mddog           # or try it without installing
+  ```
+
+  To update, run `nix profile upgrade mddog`.
+
+  To add it to your system flake instead, add the input:
+
+  ```nix
+  inputs.mddog = {
+    url = "github:qu8n/mddog";
+    # Optional: reuse your own nixpkgs input (used on Apple Silicon)
+    # inputs.nixpkgs.follows = "nixpkgs";
+  };
+  ```
+
+  Then add `inputs.mddog.packages.${pkgs.stdenv.hostPlatform.system}.default` to your packages list.
+
+</details>
+
+<details>
   <summary>Build from source</summary>
 
   Install [Rust](https://rust-lang.org/tools/install/) first, then run:
@@ -59,6 +83,7 @@ To update, run `brew upgrade mddog`. If you use the [Claude Code plugin](/docs/c
 
   ```sh
   brew uninstall mddog   # or, if you used the script: rm ~/.local/bin/mdd
+                         # or, if you used Nix: nix profile remove mddog
   rm -rf ~/Library/Caches/mddog
   rm -r ~/.config/mddog
   ```
