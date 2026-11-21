@@ -96,10 +96,17 @@ fn start_replying(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::
     start_sized(exe, args, dir, size, reply, env, job)
 }
 
+/// Serializes `openpty` calls: macOS `openpty` uses `ptsname`'s process-global static buffer and is not thread-safe.
+static OPENPTY: Mutex<()> = Mutex::new(());
+
 fn start_sized(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Path>, mut size: libc::winsize, reply: Vec<u8>, env: &[(&str, &str)], job: bool) -> Viewer {
+    let slot = Slot::take();
     let (mut master, mut slave) = (0, 0);
-    // SAFETY: each pointer is a valid out-pointer or null, which openpty allows for the name and termios.
-    assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
+    {
+        let _guard = OPENPTY.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // SAFETY: each pointer is a valid out-pointer or null, which openpty allows for the name and termios.
+        assert_eq!(unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) }, 0);
+    }
     // SAFETY: openpty returned a new fd that nothing else owns.
     let slave = unsafe { OwnedFd::from_raw_fd(slave) };
     let mut cmd = Command::new(exe);
@@ -127,7 +134,6 @@ fn start_sized(exe: &std::path::Path, args: &[&str], dir: Option<&std::path::Pat
             Ok(())
         });
     }
-    let slot = Slot::take();
     let child = cmd.spawn().unwrap();
     // SAFETY: openpty returned a new fd that nothing else owns.
     let tty = unsafe { std::fs::File::from_raw_fd(master) };
