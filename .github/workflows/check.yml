@@ -16,13 +16,34 @@ env:
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
-  check:
-    # The CoreText, CoreGraphics and pty tests need macOS.
-    runs-on: macos-latest
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fontconfig fonts-noto-core fonts-noto-mono fonts-noto-color-emoji fonts-dejavu fonts-stix musl-tools
       - run: ./check.sh
+      - name: Build the static binary that releases ship
+        if: runner.os == 'Linux'
+        run: |
+          set -eu
+          target=$(uname -m)-unknown-linux-musl
+          rustup target add "$target"
+          cargo build --locked --target "$target"
+          file "target/$target/debug/mdd" | grep -Eq 'statically linked|static-pie linked'
+          "target/$target/debug/mdd" --version
+
+  check:
+    needs: test
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: test "${{ needs.test.result }}" = success

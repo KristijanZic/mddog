@@ -1,11 +1,14 @@
 //! The clipboard: through pbcopy, and through the terminal for a viewer over SSH.
+#[cfg(target_os = "macos")]
 use std::io::Write;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 /// Puts `text` on the clipboard with pbcopy, and returns the OSC 52 sequence that does it through the terminal.
 pub fn copy(text: &str) -> String {
     let text = pasteable(text);
     let seq = osc52(&text);
+    #[cfg(target_os = "macos")]
     pbcopy(text);
     seq
 }
@@ -19,6 +22,7 @@ fn osc52(text: &str) -> String {
     format!("\x1b]52;c;{}\x1b\\", crate::term::kitty::base64(text.as_bytes()))
 }
 
+#[cfg(target_os = "macos")]
 fn pbcopy(text: String) {
     std::thread::spawn(move || {
         let Ok(mut child) = Command::new("pbcopy").env("LC_CTYPE", "UTF-8").stdin(Stdio::piped()).spawn() else { return };

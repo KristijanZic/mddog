@@ -19,6 +19,8 @@
       systems = [
         "aarch64-darwin"
         "x86_64-darwin"
+        "aarch64-linux"
+        "x86_64-linux"
       ];
 
       mkPkgs =
@@ -47,6 +49,17 @@
             cargoLock = {
               lockFile = ./Cargo.lock;
             };
+
+            FONTCONFIG_FILE = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux (
+              pkgs.makeFontsConf {
+                fontDirectories = with pkgs; [
+                  dejavu_fonts
+                  noto-fonts
+                  noto-fonts-color-emoji
+                  stix-two
+                ];
+              }
+            );
 
             checkFlags = [
               # Requires macOS /usr/bin/defaults (unavailable in the Nix sandbox).

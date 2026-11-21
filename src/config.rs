@@ -383,7 +383,7 @@ pub enum Choice {
 impl Choice {
     pub fn label(&self) -> &str {
         match self {
-            Choice::Follow { .. } => "Follow macOS",
+            Choice::Follow { .. } => FOLLOW_LABEL,
             Choice::Theme { value, .. } => value,
         }
     }
@@ -488,7 +488,7 @@ pub fn save(choice: &Choice) -> Result<String, String> {
         replace(&path, &text, &new).map_err(|e| format!("Can't write {}: {}", tilde(&path), crate::term::io_error(&e)))?;
     }
     Ok(match choice {
-        Choice::Follow { .. } => format!("Saved: follow the macOS appearance, in {}", tilde(&path)),
+        Choice::Follow { .. } => format!("Saved: follow the {APPEARANCE} appearance, in {}", tilde(&path)),
         Choice::Theme { .. } => format!("Saved {value} as the theme in {}", tilde(&path)),
     })
 }
@@ -567,6 +567,87 @@ pub fn font_smoothing() -> bool {
     *SYSTEM.get_or_init(system_smoothing)
 }
 
+#[cfg(target_os = "macos")]
+const FOLLOW_LABEL: &str = "Follow macOS";
+#[cfg(target_os = "macos")]
+const APPEARANCE: &str = "macOS";
+#[cfg(not(target_os = "macos"))]
+const FOLLOW_LABEL: &str = "Follow terminal";
+#[cfg(not(target_os = "macos"))]
+const APPEARANCE: &str = "terminal's";
+
+#[cfg(target_os = "macos")]
+pub fn set_dark(_dark: bool) {}
+
+#[cfg(target_os = "macos")]
+pub fn desktop_dark() -> Option<bool> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_dark(dark: bool) {
+    DARK.store(dark, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn desktop_dark() -> Option<bool> {
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let mut child = Command::new("gdbus")
+        .args([
+            "call",
+            "--session",
+            "--timeout",
+            "1",
+            "--dest",
+            "org.freedesktop.portal.Desktop",
+            "--object-path",
+            "/org/freedesktop/portal/desktop",
+            "--method",
+            "org.freedesktop.portal.Settings.Read",
+            "org.freedesktop.appearance",
+            "color-scheme",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let until = Instant::now() + Duration::from_millis(500);
+    while child.try_wait().ok()?.is_none() {
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    portal_scheme(&String::from_utf8_lossy(&child.wait_with_output().ok()?.stdout))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn portal_scheme(reply: &str) -> Option<bool> {
+    match reply.split("uint32 ").nth(1)?.chars().next()? {
+        '1' => Some(true),
+        '2' => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_smoothing() -> bool {
+    true
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_dark() -> bool {
+    DARK.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(target_os = "macos")]
 fn system_smoothing() -> bool {
     use objc2_foundation::{NSString, NSUserDefaults};
     let d = NSUserDefaults::standardUserDefaults();
@@ -574,6 +655,7 @@ fn system_smoothing() -> bool {
     d.objectForKey(&key).is_none() || d.integerForKey(&key) != 0
 }
 
+#[cfg(target_os = "macos")]
 fn system_dark() -> bool {
     use objc2_foundation::{NSString, NSUserDefaults};
     let style = NSUserDefaults::standardUserDefaults().stringForKey(&NSString::from_str("AppleInterfaceStyle"));
@@ -586,6 +668,15 @@ mod tests {
 
     fn parse(text: &str) -> Result<Config, String> {
         super::parse(text, Path::new("/nonexistent"))
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn the_portal_reply_names_the_scheme() {
+        assert_eq!(portal_scheme("(<<uint32 1>>,)\n"), Some(true));
+        assert_eq!(portal_scheme("(<<uint32 2>>,)\n"), Some(false));
+        assert_eq!(portal_scheme("(<<uint32 0>>,)\n"), None);
+        assert_eq!(portal_scheme(""), None);
     }
 
     #[test]
@@ -748,12 +839,17 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("real/later.toml")).unwrap(), "made");
         assert!(replace(&dir.join("config.toml"), "stale", "lost").is_err());
         std::fs::set_permissions(dir.join("real/config.toml"), std::os::unix::fs::PermissionsExt::from_mode(0o640)).unwrap();
-        assert!(std::process::Command::new("xattr").args(["-w", "mddog.test", "kept"]).arg(dir.join("real/config.toml")).status().unwrap().success());
+        let mac = cfg!(target_os = "macos");
+        if mac {
+            assert!(std::process::Command::new("xattr").args(["-w", "mddog.test", "kept"]).arg(dir.join("real/config.toml")).status().unwrap().success());
+        }
         replace(&dir.join("config.toml"), "new", "newer").unwrap();
         let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(dir.join("real/config.toml")).unwrap().permissions());
         assert_eq!(mode & 0o777, 0o640);
-        let out = std::process::Command::new("xattr").args(["-p", "mddog.test"]).arg(dir.join("real/config.toml")).output().unwrap();
-        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "kept");
+        if mac {
+            let out = std::process::Command::new("xattr").args(["-p", "mddog.test"]).arg(dir.join("real/config.toml")).output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "kept");
+        }
         let decoy = dir.join("decoy");
         std::fs::write(&decoy, "keep").unwrap();
         let nonce = crate::tmp::nonce();
