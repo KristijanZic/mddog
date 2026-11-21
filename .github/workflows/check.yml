@@ -4,7 +4,6 @@ on:
   push:
     paths-ignore: [website/**]
   pull_request:
-    paths-ignore: [website/**]
 
 concurrency:
   group: check-${{ github.ref }}
@@ -12,6 +11,9 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   check:
@@ -21,4 +23,6 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: ./check.sh
