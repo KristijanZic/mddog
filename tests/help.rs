@@ -268,14 +268,15 @@ fn ctrl_c_in_the_editor_keeps_the_viewer() {
     let Viewer { mut child, mut tty, out } = open(GFM, 80, &[("EDITOR", "sleep 2;:")]);
     wait_for(&out, 0, b"a=p,");
     tty.write_all(b"e").unwrap();
-    wait_for(&out, 0, b"\x1b[?1049l");
+    let left = wait_for(&out, 0, b"\x1b[?1049l");
     std::thread::sleep(Duration::from_millis(300));
     tty.write_all(b"\x03").unwrap();
-    let after = wait_for(&out, 0, b"Editor");
+    let back = wait_for(&out, left, b"\x1b[?1049h");
+    wait_for(&out, back, b"Editor");
     // Checked before writing again: a viewer that quit has closed the pty, so the write would fail
     // with EIO and hide why.
     assert!(exits_within(&mut child, Duration::from_millis(1500)).is_none(), "Ctrl-C in the editor quit the viewer");
-    wait_for(&out, after, b"a=p,");
+    wait_for(&out, back, b"a=p,");
     tty.write_all(b"q").unwrap();
     let quit = exits_within(&mut child, LIMIT);
     let _ = child.kill();
