@@ -839,16 +839,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("real/later.toml")).unwrap(), "made");
         assert!(replace(&dir.join("config.toml"), "stale", "lost").is_err());
         std::fs::set_permissions(dir.join("real/config.toml"), std::os::unix::fs::PermissionsExt::from_mode(0o640)).unwrap();
-        let mac = cfg!(target_os = "macos");
-        if mac {
-            assert!(std::process::Command::new("xattr").args(["-w", "mddog.test", "kept"]).arg(dir.join("real/config.toml")).status().unwrap().success());
+        #[cfg(target_os = "macos")]
+        {
+            let path = std::ffi::CString::new(dir.join("real/config.toml").as_os_str().as_encoded_bytes()).unwrap();
+            // SAFETY: `path` and `c"mddog.test"` are NUL-terminated C strings, and `b"kept"` is valid for 4 bytes.
+            assert_eq!(unsafe { libc::setxattr(path.as_ptr(), c"mddog.test".as_ptr(), b"kept".as_ptr().cast(), 4, 0, 0) }, 0);
         }
         replace(&dir.join("config.toml"), "new", "newer").unwrap();
         let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(dir.join("real/config.toml")).unwrap().permissions());
         assert_eq!(mode & 0o777, 0o640);
-        if mac {
-            let out = std::process::Command::new("xattr").args(["-p", "mddog.test"]).arg(dir.join("real/config.toml")).output().unwrap();
-            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "kept");
+        #[cfg(target_os = "macos")]
+        {
+            let path = std::ffi::CString::new(dir.join("real/config.toml").as_os_str().as_encoded_bytes()).unwrap();
+            let mut buf = [0u8; 16];
+            // SAFETY: `path` and `c"mddog.test"` are NUL-terminated C strings, and `buf` is valid for `buf.len()` bytes.
+            let n = unsafe { libc::getxattr(path.as_ptr(), c"mddog.test".as_ptr(), buf.as_mut_ptr().cast(), buf.len(), 0, 0) };
+            assert_eq!(n, 4);
+            assert_eq!(&buf[..4], b"kept");
         }
         let decoy = dir.join("decoy");
         std::fs::write(&decoy, "keep").unwrap();
